@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pnf-rr"
+version = "0.1.0"
+description = "Deterministic Point & Figure engine: charts, signals, price objectives, stops, reward/risk"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Chris Duffy", email = "spinchange@gmail.com" }]
+dependencies = []
+
+[project.scripts]
+pnf = "pnf.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
