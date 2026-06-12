@@ -21,9 +21,12 @@ Example:
 ```
 LRCX  2026-06-11  close 362.52
 P&F:        Double Top Breakout on 2026-06-11 (bullish, triggered at 352.00)
-Objective:  456.00  (count column still active - objective may extend)
+Status:     bullish
+Objective:  439.00
 Stop:       316.00  (one box below last O-column low)
-Reward:     93.48   Risk: 46.52   R/R: 2.01
+Reward:     76.48
+Risk:       46.52
+R/R:        1.64
 ```
 
 ## Method (all deterministic)
