@@ -19,6 +19,23 @@ class DataError(RuntimeError):
     pass
 
 
+# SPDR S&P 500 sector ETFs: ticker -> (sector name, palette color)
+SECTOR_ETFS = {
+    "XLB": ("Materials", "#9999FF"),
+    "XLC": ("Communication Services", "#9900CC"),
+    "XLE": ("Energy", "#FFCC00"),
+    "XLF": ("Financials", "#A3E635"),
+    "XLI": ("Industrials", "#0066FF"),
+    "XLK": ("Technology", "#FF00FF"),
+    "XLP": ("Consumer Staples", "#00CC99"),
+    "XLRE": ("Real Estate", "#E11D48"),
+    "XLU": ("Utilities", "#FF6600"),
+    "XLV": ("Health Care", "#00E5FF"),
+    "XLY": ("Consumer Discretionary", "#22C55E"),
+}
+SECTORS = list(SECTOR_ETFS)
+
+
 def _get(url: str) -> bytes:
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=30) as r:

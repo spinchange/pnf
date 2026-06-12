@@ -9,7 +9,7 @@ RED = "\x1b[31m"
 RESET = "\x1b[0m"
 
 
-def _color_enabled() -> bool:
+def color_enabled() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
     if not sys.stdout.isatty():
@@ -19,9 +19,27 @@ def _color_enabled() -> bool:
     return True
 
 
+def _rgb(hexcode: str) -> tuple[int, int, int]:
+    h = hexcode.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def paint_hex(text: str, hexcode: str) -> str:
+    """Text in a 24-bit foreground color."""
+    r, g, b = _rgb(hexcode)
+    return f"\x1b[38;2;{r};{g};{b}m{text}{RESET}"
+
+
+def highlight(text: str, hexcode: str) -> str:
+    """Text on a 24-bit background chip, black or white by luminance."""
+    r, g, b = _rgb(hexcode)
+    fg = 30 if 0.299 * r + 0.587 * g + 0.114 * b > 150 else 97
+    return f"\x1b[48;2;{r};{g};{b}m\x1b[{fg}m{text}{RESET}"
+
+
 def render(chart: Chart, max_cols: int = 25, color: bool | None = None) -> str:
     if color is None:
-        color = _color_enabled()
+        color = color_enabled()
     x_cell = f"{GREEN}X{RESET}" if color else "X"
     o_cell = f"{RED}O{RESET}" if color else "O"
 

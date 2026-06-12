@@ -17,6 +17,8 @@ from datetime import date, timedelta
 
 from . import analysis, chart as chartmod, data, render
 
+GOLD = "#D4AF37"
+
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -64,10 +66,29 @@ def _ticker(argv):
     return 0
 
 
+def _paint(text: str, status: str, enabled: bool) -> str:
+    """Color text green/red by signal status (bullish/bearish)."""
+    if not enabled:
+        return text
+    code = {"bullish": render.GREEN, "bearish": render.RED}.get(status)
+    return f"{code}{text}{render.RESET}" if code else text
+
+
 def _report(ch, an):
-    print(f"{an.ticker}  {an.date}  close {an.close:.2f}")
+    head = f"{an.ticker}  {an.date}  close {an.close:.2f}"
+    info = data.SECTOR_ETFS.get(an.ticker)
+    if info:
+        name, hexcode = info
+        if render.color_enabled():
+            head = (render.highlight(f" {an.ticker} ", hexcode)
+                    + f" {an.date}  close {an.close:.2f}  "
+                    + render.paint_hex(name, hexcode))
+        else:
+            head += f"  ({name})"
+    print(head)
     if an.pattern:
-        print(f"P&F:        {an.pattern} on {an.signal_date} "
+        pat = _paint(an.pattern, an.status, render.color_enabled())
+        print(f"P&F:        {pat} on {an.signal_date} "
               f"({an.status}, triggered at {an.trigger:.2f})")
     print(f"Status:     {an.status}")
     if an.objective is not None:
@@ -106,7 +127,8 @@ def _explain(an):
 def _scan(argv):
     p = argparse.ArgumentParser(prog="pnf scan")
     p.add_argument("universe", nargs="?", default="sp500",
-                   help="'sp500' or a path to a file of tickers, one per line")
+                   help="'sp500', 'sectors' (SPDR sector ETFs), or a path to "
+                        "a file of tickers, one per line")
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--limit", type=int, help="only scan the first N tickers")
     p.add_argument("--days", type=int,
@@ -120,6 +142,8 @@ def _scan(argv):
 
     if a.universe.lower() == "sp500":
         tickers = data.sp500()
+    elif a.universe.lower() == "sectors":
+        tickers = data.SECTORS
     else:
         with open(a.universe) as f:
             tickers = [t.strip().upper() for t in f if t.strip()]
@@ -153,13 +177,48 @@ def _scan(argv):
     if a.json:
         print(json.dumps([r.to_dict() for r in rows], indent=2))
     else:
-        fmt = "{:<7} {:>9} {:<24} {:<11} {:>9} {:>9} {:>6}"
-        print(fmt.format("Ticker", "Close", "Pattern", "Signal", "Objectv",
-                         "Stop", "R/R"))
+        color = render.color_enabled()
+        with_sector = any(r.ticker in data.SECTOR_ETFS for r in rows)
+        # pad every cell before painting: ANSI codes would count toward
+        # a format width and break column alignment
+        header = " ".join(
+            [f"{'Ticker':<6}"]
+            + ([f"{'Sector':<23}"] if with_sector else [])
+            + (["  "] if color else [])
+            + [f"{'Close':>9}", f"{'Pattern':<24}", f"{'Signal':<11}",
+               f"{'Objectv':>9}", f"{'Stop':>9}", f"{'R/R':>6}"])
+        lines = [header]
         for r in rows:
-            print(fmt.format(r.ticker, f"{r.close:.2f}", r.pattern,
-                             r.signal_date, f"{r.objective:.2f}",
-                             f"{r.stop:.2f}", f"{r.rr:.2f}"))
+            name, hexcode = data.SECTOR_ETFS.get(r.ticker, ("", None))
+            tick = f"{r.ticker:<6}"
+            if color and hexcode:
+                tick = render.highlight(tick, hexcode)
+            cells = [tick]
+            if with_sector:
+                sec = f"{name:<23}"
+                cells.append(render.paint_hex(sec, hexcode)
+                             if color and hexcode else sec)
+            if color:
+                tri = "▲" if r.status == "bullish" else "▼"
+                cells.append(_paint(f"{tri} ", r.status, color))
+            cells += [f"{r.close:>9.2f}",
+                      _paint(f"{r.pattern:<24}", r.status, color),
+                      f"{r.signal_date:<11}",
+                      f"{r.objective:>9.2f}", f"{r.stop:>9.2f}",
+                      f"{r.rr:>6.2f}"]
+            lines.append(" ".join(cells))
+        if color:
+            # gold frame; plain (piped/NO_COLOR) output stays bare so it
+            # remains grep/parse-friendly and codepage-safe
+            gold = lambda s: render.paint_hex(s, GOLD)
+            inner = len(header) + 2
+            print(gold("┌" + "─" * inner + "┐"))
+            for ln in lines:
+                print(gold("│ ") + ln + gold(" │"))
+            print(gold("└" + "─" * inner + "┘"))
+        else:
+            for ln in lines:
+                print(ln)
     if failed:
         print(f"({len(failed)} tickers failed: {', '.join(failed[:10])}"
               f"{'...' if len(failed) > 10 else ''})", file=sys.stderr)

@@ -13,6 +13,7 @@ pnf LRCX --json         # machine-readable
 pnf LRCX --explain      # pipe the numbers through `claude -p` for a writeup
 pnf scan                # scan the S&P 500, rank buy signals by R/R
 pnf scan --top 10 --days 7 --side both
+pnf scan sectors --side both    # rank the 11 SPDR sector ETFs
 pnf scan mylist.txt     # custom universe, one ticker per line
 ```
 
