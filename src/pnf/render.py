@@ -72,10 +72,15 @@ def render(chart: Chart, max_cols: int = 25, color: bool | None = None) -> str:
             grid[top - idx][ci] = (ch, paint)
 
     lines = []
+    rev_idx = chart.reversal_idx
     for r, idx in enumerate(range(top, bot - 1, -1)):
         cells = [f"{p}{ch}{RESET}" if color and p else ch for ch, p in grid[r]]
         label = f"{chart.ladder[idx]:>9.2f}"
-        mark = f"  << {chart.last_close:.2f}" if idx == close_idx else ""
+        mark = ""
+        if idx == close_idx:
+            mark += f"  << {chart.last_close:.2f}"
+        if idx == rev_idx:
+            mark += f"  << {chart.reversal}-box reversal"
         lines.append(" ".join(cells) + label + mark)
 
     width = 2 * len(cols) - 1

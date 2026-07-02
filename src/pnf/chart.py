@@ -43,10 +43,20 @@ class Chart:
     marks: dict[tuple[int, int], str] = field(default_factory=dict)
     # column index -> "YYYY" where a new year first printed a box
     years: dict[int, str] = field(default_factory=dict)
+    reversal: int = 3
 
     @property
     def last_signal(self) -> Signal | None:
         return self.signals[-1] if self.signals else None
+
+    @property
+    def reversal_idx(self) -> int | None:
+        """Ladder index of the price that would flip the current column —
+        `reversal` boxes off its extreme. None if it falls off the scale."""
+        col = self.columns[-1]
+        idx = (col.hi - self.reversal if col.kind == "X"
+               else col.lo + self.reversal)
+        return idx if idx >= 0 else None
 
 
 def build(bars, reversal: int = 3) -> Chart:
@@ -110,7 +120,7 @@ def build(bars, reversal: int = 3) -> Chart:
                     _check_buy(columns, signals, ladder, date)
 
     return Chart(ladder, columns, signals, bars[-1][0], bars[-1][3],
-                 marks, years)
+                 marks, years, reversal)
 
 
 def _check_buy(columns, signals, ladder, date):

@@ -93,6 +93,10 @@ def _report(ch, an):
     print(f"Status:     {an.status}")
     if an.trend:
         print(f"Trend:      {an.trend}")
+    if an.reversal is not None:
+        flip = "low that flips to a new O column" \
+            if ch.columns[-1].kind == "X" else "high that flips to a new X column"
+        print(f"Reversal:   {an.reversal:.2f}  ({flip})")
     if an.objective is not None:
         active = "  (count column still active - objective may extend)" \
             if an.objective_active else ""

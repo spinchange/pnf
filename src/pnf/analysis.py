@@ -43,6 +43,7 @@ class Analysis:
     rr: float | None = None
     note: str | None = None
     trend: str | None = None  # active 45-degree line and its current level
+    reversal: float | None = None  # price that flips the current column
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -51,11 +52,13 @@ class Analysis:
 def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
     close = round(chart.last_close, 2)
     trend = _trend(chart)
+    ri = chart.reversal_idx
+    rev = chart.ladder[ri] if ri is not None else None
     sig = chart.last_signal
     if sig is None:
         return Analysis(ticker, chart.last_date, close, "no signal",
                         note="no breakout or breakdown in the loaded history",
-                        trend=trend)
+                        trend=trend, reversal=rev)
 
     lad = chart.ladder
     obj_col = chart.columns[_measure_index(chart, sig.kind)] if method == "sc" \
@@ -105,7 +108,7 @@ def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
         stop=stop,
         reward=round(reward, 2),
         risk=round(risk, 2) if risk is not None else None,
-        rr=rr, note=note, trend=trend,
+        rr=rr, note=note, trend=trend, reversal=rev,
     )
 
 

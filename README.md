@@ -26,6 +26,7 @@ LRCX  2026-06-11  close 362.52
 P&F:        Double Top Breakout on 2026-06-11 (bullish, triggered at 352.00)
 Status:     bullish
 Trend:      above bullish support line (194.00)
+Reversal:   352.00  (low that flips to a new O column)
 Objective:  439.00
 Stop:       316.00  (one box below last O-column low)
 Reward:     76.48
@@ -85,6 +86,10 @@ R/R:        1.64
 - **Stop**: the price that would print the opposite signal — one box below
   the most recent completed O-column low (bullish) or one box above the most
   recent completed X-column high (bearish).
+- **Reversal**: the price that flips the current column — `reversal` boxes
+  off its extreme (the nearest chart event, distinct from the stop, which
+  flips the *signal*). Reported in the analysis and marked on the chart
+  (`<< 3-box reversal`).
 - **R/R** = (objective − close) / (close − stop).
 
 ## Validation

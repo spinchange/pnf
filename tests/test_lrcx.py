@@ -50,6 +50,10 @@ class TestLrcxAgainstStockCharts(unittest.TestCase):
         self.assertEqual(sig.date, "2026-06-11")
         self.assertEqual(sig.trigger, 352.0)
 
+    def test_reversal_level(self):
+        # current X column tops at 364 on $4 boxes: 3-box flip at 352
+        self.assertEqual(self.an.reversal, 352.0)
+
     def test_stop_objective_rr(self):
         an = self.an
         self.assertEqual(an.status, "bullish")

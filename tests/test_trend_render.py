@@ -49,6 +49,21 @@ class TestTrendLines(unittest.TestCase):
             "above bullish support line"))
 
 
+class TestReversal(unittest.TestCase):
+    def test_x_column_reversal_is_three_boxes_off_the_high(self):
+        c = chart(50, 55, 52, 56)  # current column X(53-56)
+        self.assertEqual(analyze(c, "TEST").reversal, 53.0)
+
+    def test_o_column_reversal_is_three_boxes_off_the_low(self):
+        c = chart(60, 55, 58, 54)  # current column O(57-54)
+        self.assertEqual(analyze(c, "TEST").reversal, 57.0)
+
+    def test_reversal_marker_on_the_chart(self):
+        out = render(chart(50, 55, 52, 56), color=False)
+        row = next(r for r in out.splitlines() if "3-box reversal" in r)
+        self.assertIn("53.00", row)
+
+
 class TestRender(unittest.TestCase):
     def test_month_code_replaces_the_box_mark(self):
         c = build(bars(("2026-01-05", 50), ("2026-01-20", 55),
