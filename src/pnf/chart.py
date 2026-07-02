@@ -7,6 +7,7 @@ reversal. Mirror logic for O columns. Extension always beats reversal.
 from dataclasses import dataclass
 
 from .boxes import Ladder
+from .patterns import classify
 
 
 @dataclass
@@ -84,29 +85,19 @@ def build(bars, reversal: int = 3) -> Chart:
 
 def _check_buy(columns, signals, ladder, date):
     cur = columns[-1]
-    if cur.signaled:
+    n = len(columns) - 1
+    if cur.signaled or n < 2 or cur.hi <= columns[n - 2].hi:
         return
-    prior_x = [c for c in columns[:-1] if c.kind == "X"]
-    if not prior_x or cur.hi <= prior_x[-1].hi:
-        return
-    top = prior_x[-1].hi
-    pattern = "Double Top Breakout"
-    if len(prior_x) >= 2 and prior_x[-2].hi == top:
-        pattern = "Triple Top Breakout"
     cur.signaled = True
-    signals.append(Signal("buy", pattern, date, ladder[top + 1], len(columns) - 1))
+    signals.append(Signal("buy", classify(columns, signals, "buy"), date,
+                          ladder[columns[n - 2].hi + 1], n))
 
 
 def _check_sell(columns, signals, ladder, date):
     cur = columns[-1]
-    if cur.signaled:
+    n = len(columns) - 1
+    if cur.signaled or n < 2 or cur.lo >= columns[n - 2].lo:
         return
-    prior_o = [c for c in columns[:-1] if c.kind == "O"]
-    if not prior_o or cur.lo >= prior_o[-1].lo:
-        return
-    bot = prior_o[-1].lo
-    pattern = "Double Bottom Breakdown"
-    if len(prior_o) >= 2 and prior_o[-2].lo == bot:
-        pattern = "Triple Bottom Breakdown"
     cur.signaled = True
-    signals.append(Signal("sell", pattern, date, ladder[bot - 1], len(columns) - 1))
+    signals.append(Signal("sell", classify(columns, signals, "sell"), date,
+                          ladder[columns[n - 2].lo - 1], n))

@@ -185,7 +185,7 @@ def _scan(argv):
             [f"{'Ticker':<6}"]
             + ([f"{'Sector':<23}"] if with_sector else [])
             + (["  "] if color else [])
-            + [f"{'Close':>9}", f"{'Pattern':<24}", f"{'Signal':<11}",
+            + [f"{'Close':>9}", f"{'Pattern':<34}", f"{'Signal':<11}",
                f"{'Objectv':>9}", f"{'Stop':>9}", f"{'R/R':>6}"])
         lines = [header]
         for r in rows:
@@ -202,7 +202,7 @@ def _scan(argv):
                 tri = "▲" if r.status == "bullish" else "▼"
                 cells.append(_paint(f"{tri} ", r.status, color))
             cells += [f"{r.close:>9.2f}",
-                      _paint(f"{r.pattern:<24}", r.status, color),
+                      _paint(f"{r.pattern:<34}", r.status, color),
                       f"{r.signal_date:<11}",
                       f"{r.objective:>9.2f}", f"{r.stop:>9.2f}",
                       f"{r.rr:>6.2f}"]

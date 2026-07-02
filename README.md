@@ -42,8 +42,18 @@ R/R:        1.64
   10 to $2,500, 50 to $25,000, 500 above (bands through $50 boxes verified
   against live _TICKER charts). Extension always beats reversal, matching
   StockCharts.
-- **Signals**: Double/Triple Top Breakout (X column exceeds prior X top),
-  Double/Triple Bottom Breakdown (mirror).
+- **Signals**: the StockCharts 3-box pattern catalog, classified
+  most-specific-first at the moment a column crosses the prior same-kind
+  extreme — Double / Triple / Quadruple Top Breakout, Spread Triple Top
+  Breakout (equal tops at least seven columns apart with nothing between at
+  the level and no breakdown inside), Ascending Triple Top Breakout
+  (back-to-back double-top breakouts, rising inner low, no breakdown inside
+  the formation), Bullish Catapult (triple-or-better breakout, pullback that
+  holds, double-top breakout), Bearish Signal Reversed (three lower lows and
+  two lower highs ended by a double-top breakout) — plus the exact bearish
+  mirrors (… Bottom Breakdown, Descending Triple Bottom, Bearish Catapult,
+  Bullish Signal Reversed). The ascending "no breakdown inside" constraint
+  is verified against StockCharts' _LRCX label of 2026-06-11.
 - **Objective** (default `sc`): StockCharts' automated Breakout Method,
   reverse-engineered to the dollar. The measure column is the first
   buy/sell-signal column after the most recent opposite signal (the column
@@ -67,7 +77,8 @@ R/R:        1.64
 `tests/test_lrcx.py` freezes LRCX history through 2026-06-11 and asserts the
 engine reproduces stockcharts.com's chart from that day box-for-box: current
 X column 324–364, prior O-column low 320, Double Top Breakout 2026-06-11
-triggered at 352, stop 316, objective 456.
+triggered at 352, stop 316, objective 456. `tests/test_patterns.py` covers
+the full pattern catalog on hand-traced synthetic charts.
 
 ```
 python -m unittest discover -s tests
@@ -79,6 +90,11 @@ python -m unittest discover -s tests
   boundary (e.g. through $1,000, where boxes jump from $5 to $50) project
   in the larger boxes and can look extreme. The default `sc` method works
   in dollars and does not have this artifact.
+- Pattern names follow the ChartSchool definitions, but only the labels
+  captured on 2026-06-11 (LRCX) are verified against StockCharts' own
+  automated labels. Their engine may have undocumented tie-breaks for the
+  rarer names (spread widths, catapult feeders); treat exotic labels as
+  advisory until more are field-checked.
 - A high R/R often means price has pulled back to just above the stop — the
   risk is small but the chart is one box from a sell signal. Pair the scan
   with `--days N` for fresh signals and look at the chart before acting.
