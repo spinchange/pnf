@@ -28,20 +28,25 @@ def box_size_at(price: float) -> float:
 
 class Ladder:
     """The fixed grid of box values. Columns are stored as index ranges into it,
-    which keeps every calculation exact across box-size band boundaries."""
+    which keeps every calculation exact across box-size band boundaries.
 
-    def __init__(self, max_price: float):
+    `box` overrides the traditional scale with a fixed box size on a grid
+    starting at 0 — used for percent-scaled charts like the Bullish Percent
+    Index (2-point boxes on 0-100)."""
+
+    def __init__(self, max_price: float, box: float | None = None):
+        self.box = box
         self.vals: list[float] = []
-        v = 0.0625
-        limit = max(max_price, 1.0)
+        v = 0.0 if box else 0.0625
+        limit = max(max_price, box or 1.0)
         while v <= limit:
             self.vals.append(round(v, 4))
-            v += box_size_at(v)
+            v += box or box_size_at(v)
 
     def _ensure(self, idx: int) -> None:
         while idx >= len(self.vals):
             v = self.vals[-1]
-            self.vals.append(round(v + box_size_at(v), 4))
+            self.vals.append(round(v + (self.box or box_size_at(v)), 4))
 
     def __getitem__(self, idx: int) -> float:
         if idx < 0:

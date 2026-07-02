@@ -16,7 +16,11 @@ pnf LRCX --explain      # pipe the numbers through `claude -p` for a writeup
 pnf scan                # scan the S&P 500, rank buy signals by R/R
 pnf scan --top 10 --days 7 --side both
 pnf scan sectors --side both    # rank the 11 SPDR sector ETFs
+pnf scan snowball       # scan the snowball sector-membership universe
+pnf scan xle            # scan one sector's components
 pnf scan mylist.txt     # custom universe, one ticker per line
+pnf bpi                 # S&P 500 bullish percent + all 11 sectors
+pnf bpi xle --chart     # one sector's BPI with its own P&F chart
 ```
 
 Example:
@@ -91,6 +95,22 @@ R/R:        1.64
   flips the *signal*). Reported in the analysis and marked on the chart
   (`<< 3-box reversal`).
 - **R/R** = (objective − close) / (close − stop).
+- **Bullish percent** (`pnf bpi`): percent of the universe whose latest P&F
+  signal is a buy, per sector and for the whole index. The universe is the
+  snowball project's SPDR membership CSVs (`xle-components.csv` etc.,
+  default `~\Documents\snowball`, override with `PNF_SNOWBALL`). Each
+  ticker's signal history is a dated step function, so the full BPI series
+  falls out of one chart build per ticker; the series is itself charted
+  P&F-style (2-point boxes on 0-100, 3-box reversal) and read with the
+  Chartcraft/Dorsey six-state vocabulary — Bull/Bear Alert (reversal out of
+  the sub-30 / over-70 zone, no signal yet), Bull/Bear Confirmed (the BPI
+  chart's own buy/sell signal), Bull/Bear Correction (reversal against the
+  confirmed state, mid-zone). A ticker joins the denominator at its first
+  signal; the series starts once half the members have joined, so a thin
+  early denominator can't fake extreme readings. Caveats: history uses
+  *today's* membership backfilled (survivorship bias — fine for current
+  readings, don't backtest); small sectors are coarse (21 energy names =
+  4.76 points per stock).
 
 ## Validation
 
@@ -100,7 +120,9 @@ X column 324–364, prior O-column low 320, Double Top Breakout 2026-06-11
 triggered at 352, stop 316, objective 456. `tests/test_patterns.py` covers
 the full pattern catalog on hand-traced synthetic charts;
 `tests/test_trend_render.py` covers trend-line flips and the chart's month
-codes, bottom axis, and year markers.
+codes, bottom axis, and year markers. `tests/test_bpi.py` covers the BPI
+series aggregation, all six state readings, and the snowball universe
+loader.
 
 ```
 python -m unittest discover -s tests

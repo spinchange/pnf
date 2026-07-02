@@ -1,7 +1,10 @@
-"""Daily OHLC via the Yahoo Finance v8 chart API (stdlib only), plus the
-S&P 500 universe from Wikipedia. Responses are cached per calendar day under
-%LOCALAPPDATA%\\pnf\\cache; stale days are pruned automatically.
+"""Daily OHLC via the Yahoo Finance v8 chart API (stdlib only), plus two
+S&P 500 universes: Wikipedia (flat list) and the snowball project's SPDR
+sector membership CSVs (xle-components.csv etc., which add sector structure
+— required for sector bullish percent). Responses are cached per calendar
+day under %LOCALAPPDATA%\\pnf\\cache; stale days are pruned automatically.
 """
+import csv
 import json
 import os
 import re
@@ -13,6 +16,8 @@ from pathlib import Path
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 CACHE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "pnf" / "cache"
 WIKI_SP500 = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+SNOWBALL = Path(os.environ.get("PNF_SNOWBALL",
+                               str(Path.home() / "Documents" / "snowball")))
 
 
 class DataError(RuntimeError):
@@ -84,6 +89,31 @@ def fetch_daily(ticker: str, range_: str = "5y"):
     if not bars:
         raise DataError(f"{ticker}: empty history")
     return bars
+
+
+def sector_components(etf: str) -> list[str]:
+    """Symbols from <snowball>/<etf>-components.csv (symbol,name header),
+    normalized to Yahoo form (BRK.B -> BRK-B)."""
+    path = SNOWBALL / f"{etf.lower()}-components.csv"
+    if not path.exists():
+        raise DataError(f"{path} not found - set PNF_SNOWBALL to the "
+                        "snowball project directory")
+    with path.open(newline="") as f:
+        out = [r["symbol"].strip().upper().replace(".", "-").replace("/", "-")
+               for r in csv.DictReader(f) if r.get("symbol", "").strip()]
+    if not out:
+        raise DataError(f"{path}: no symbols")
+    return out
+
+
+def snowball() -> dict[str, list[str]]:
+    """sector ETF -> component symbols, for every sector CSV present."""
+    out = {etf: sector_components(etf) for etf in SECTORS
+           if (SNOWBALL / f"{etf.lower()}-components.csv").exists()}
+    if not out:
+        raise DataError(f"no *-components.csv files under {SNOWBALL} - "
+                        "set PNF_SNOWBALL to the snowball project directory")
+    return out
 
 
 def sp500() -> list[str]:

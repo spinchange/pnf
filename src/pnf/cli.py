@@ -7,6 +7,10 @@ Usage:
   pnf LRCX --explain       pipe the numbers through `claude -p` for a writeup
   pnf scan                 scan the S&P 500, rank by reward/risk
   pnf scan --top 10 --days 5
+  pnf scan snowball        scan the snowball sector-membership universe
+  pnf scan xle             scan one sector's components
+  pnf bpi                  S&P 500 bullish percent + all 11 sectors
+  pnf bpi xle --chart      one sector's BPI with its P&F chart
 """
 import argparse
 import json
@@ -15,7 +19,7 @@ import subprocess
 import sys
 from datetime import date, timedelta
 
-from . import analysis, chart as chartmod, data, render
+from . import analysis, bpi as bpimod, chart as chartmod, data, render
 
 GOLD = "#D4AF37"
 
@@ -24,6 +28,8 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0].lower() == "scan":
         return _scan(argv[1:])
+    if argv and argv[0].lower() == "bpi":
+        return _bpi(argv[1:])
     return _ticker(argv)
 
 
@@ -130,11 +136,106 @@ def _explain(an):
     subprocess.run([exe, "-p", prompt])
 
 
+def _bpi(argv):
+    p = argparse.ArgumentParser(prog="pnf bpi")
+    p.add_argument("sector", nargs="?",
+                   help="one sector ETF (e.g. XLE); default: overall S&P "
+                        "500 plus all 11 sectors")
+    p.add_argument("--range", default="5y")
+    p.add_argument("--chart", action="store_true",
+                   help="print the BPI's own P&F chart")
+    p.add_argument("--limit", type=int, help="only scan the first N tickers")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+
+    members = data.snowball()
+    if a.sector:
+        etf = a.sector.upper()
+        if etf not in members:
+            print(f"error: no components file for {etf} "
+                  f"(have: {', '.join(members)})", file=sys.stderr)
+            return 1
+        members = {etf: members[etf]}
+
+    tickers = sorted({t for ts in members.values() for t in ts})
+    if a.limit:
+        tickers = tickers[: a.limit]
+    sigs, failed = {}, []
+    for i, t in enumerate(tickers, 1):
+        if i % 25 == 0:
+            print(f"  ... {i}/{len(tickers)}", file=sys.stderr)
+        try:
+            sigs[t] = chartmod.build(data.fetch_daily(t, a.range)).signals
+        except (data.DataError, OSError):
+            failed.append(t)
+
+    sectors = []
+    for etf, ts in members.items():
+        sub = {t: sigs[t] for t in ts if t in sigs}
+        if sub:
+            sectors.append((etf, bpimod.compute(data.SECTOR_ETFS[etf][0], sub)))
+    sectors.sort(key=lambda x: x[1].pct, reverse=True)
+    if a.sector:
+        top = sectors[0][1]
+    else:
+        top = bpimod.compute("S&P 500", sigs)
+
+    if a.json:
+        out = {"date": top.chart.last_date, "name": top.name,
+               "bpi": top.pct, "status": top.status,
+               "bullish": top.bullish, "members": top.members}
+        if not a.sector:
+            out["sectors"] = [
+                {"etf": etf, "name": b.name, "bpi": b.pct, "status": b.status,
+                 "bullish": b.bullish, "members": b.members}
+                for etf, b in sectors]
+        print(json.dumps(out, indent=2))
+    else:
+        color = render.color_enabled()
+        col = top.chart.columns[-1].kind
+        print(f"{top.name} Bullish Percent  as of {top.chart.last_date}")
+        print(f"BPI:     {top.pct:.1f}%  ({top.bullish}/{top.members} "
+              "on buy signals)")
+        print(f"Status:  {_paint_bpi(top.status, color)}  ({col} column)")
+        if not a.sector:
+            print()
+            header = (f"{'Sector':<23} {'  ' if color else ''}{'BPI':>6} "
+                      f"{'Col':^4} {'Status':<16} {'Bulls':>8}")
+            print(header)
+            for etf, b in sectors:
+                name, hexcode = data.SECTOR_ETFS[etf]
+                sec = f"{name:<23}"
+                if color:
+                    sec = render.paint_hex(sec, hexcode)
+                    tri = "▲ " if b.status.startswith("Bull") else "▼ "
+                else:
+                    tri = ""
+                print(f"{sec} {tri}{b.pct:>6.1f} "
+                      f"{b.chart.columns[-1].kind:^4} "
+                      f"{_paint_bpi(f'{b.status:<16}', color)} "
+                      f"{f'{b.bullish}/{b.members}':>8}")
+        if a.chart:
+            print()
+            print(render.render(top.chart))
+    if failed:
+        print(f"({len(failed)} tickers failed: {', '.join(failed[:10])}"
+              f"{'...' if len(failed) > 10 else ''})", file=sys.stderr)
+    return 0
+
+
+def _paint_bpi(status: str, enabled: bool) -> str:
+    if not enabled:
+        return status
+    code = render.GREEN if status.lstrip().startswith("Bull") else render.RED
+    return f"{code}{status}{render.RESET}"
+
+
 def _scan(argv):
     p = argparse.ArgumentParser(prog="pnf scan")
     p.add_argument("universe", nargs="?", default="sp500",
-                   help="'sp500', 'sectors' (SPDR sector ETFs), or a path to "
-                        "a file of tickers, one per line")
+                   help="'sp500' (Wikipedia), 'sectors' (SPDR sector ETFs), "
+                        "'snowball' (sector-membership CSVs), a sector ETF "
+                        "(e.g. xle), or a path to a file of tickers")
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--limit", type=int, help="only scan the first N tickers")
     p.add_argument("--days", type=int,
@@ -146,10 +247,15 @@ def _scan(argv):
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
-    if a.universe.lower() == "sp500":
+    u = a.universe.lower()
+    if u == "sp500":
         tickers = data.sp500()
-    elif a.universe.lower() == "sectors":
+    elif u == "sectors":
         tickers = data.SECTORS
+    elif u == "snowball":
+        tickers = sorted({t for ts in data.snowball().values() for t in ts})
+    elif u.upper() in data.SECTOR_ETFS:
+        tickers = data.sector_components(u)
     else:
         with open(a.universe) as f:
             tickers = [t.strip().upper() for t in f if t.strip()]
