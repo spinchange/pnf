@@ -4,10 +4,12 @@ Matches the StockCharts daily P&F convention: an X column extends if the day's
 high reaches the next box; only if it does not is the day's low checked for a
 reversal. Mirror logic for O columns. Extension always beats reversal.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .boxes import Ladder
-from .patterns import classify
+from .patterns import check_trap, classify
+
+MONTH_CODES = "123456789ABC"  # Jan-Sep, A=Oct B=Nov C=Dec (traditional)
 
 
 @dataclass
@@ -36,6 +38,11 @@ class Chart:
     signals: list[Signal]
     last_date: str
     last_close: float
+    # (column index, ladder index) -> month code: the first box printed in a
+    # new month shows the month instead of X/O (traditional convention)
+    marks: dict[tuple[int, int], str] = field(default_factory=dict)
+    # column index -> "YYYY" where a new year first printed a box
+    years: dict[int, str] = field(default_factory=dict)
 
     @property
     def last_signal(self) -> Signal | None:
@@ -56,31 +63,54 @@ def build(bars, reversal: int = 3) -> Chart:
     kind = "X" if c0 >= (h0 + l0) / 2 else "O"
     columns = [Column(kind, hi, lo, d0, d0)]
     signals: list[Signal] = []
+    marks: dict[tuple[int, int], str] = {}
+    years: dict[int, str] = {}
+    last_ym = d0[:7]  # "YYYY-MM" of the last printed box
+
+    def stamp(date, box_idx):
+        """The first box printed in a new month carries the month code; the
+        first in a new year also marks the column for the year axis."""
+        nonlocal last_ym
+        if date[:7] == last_ym:
+            return
+        if date[:4] != last_ym[:4]:
+            years[len(columns) - 1] = date[:4]
+        marks[(len(columns) - 1, box_idx)] = MONTH_CODES[int(date[5:7]) - 1]
+        last_ym = date[:7]
 
     for date, h, l, _c in bars[1:]:
         col = columns[-1]
         if col.kind == "X":
             nh = ladder.floor(h)
             if nh > col.hi:
+                first = col.hi + 1
                 col.hi, col.end = nh, date
+                stamp(date, first)
                 _check_buy(columns, signals, ladder, date)
             else:
                 nl = ladder.ceil(l)
                 if col.hi - nl >= reversal:
                     columns.append(Column("O", col.hi - 1, nl, date, date))
+                    stamp(date, col.hi - 1)
+                    check_trap(columns, signals, ladder)
                     _check_sell(columns, signals, ladder, date)
         else:
             nl = ladder.ceil(l)
             if nl < col.lo:
+                first = col.lo - 1
                 col.lo, col.end = nl, date
+                stamp(date, first)
                 _check_sell(columns, signals, ladder, date)
             else:
                 nh = ladder.floor(h)
                 if nh - col.lo >= reversal:
                     columns.append(Column("X", nh, col.lo + 1, date, date))
+                    stamp(date, col.lo + 1)
+                    check_trap(columns, signals, ladder)
                     _check_buy(columns, signals, ladder, date)
 
-    return Chart(ladder, columns, signals, bars[-1][0], bars[-1][3])
+    return Chart(ladder, columns, signals, bars[-1][0], bars[-1][3],
+                 marks, years)
 
 
 def _check_buy(columns, signals, ladder, date):

@@ -1,11 +1,20 @@
-"""ASCII rendering of a P&F chart, StockCharts-style orientation."""
+"""ASCII rendering of a P&F chart, StockCharts-style orientation.
+
+Traditional conventions: the first box printed in a new month shows the
+month code (1-9, A=Oct, B=Nov, C=Dec) instead of X/O; a horizontal axis
+closes the bottom of the chart with year numbers under the columns where
+each year began. 45-degree trend lines are drawn in empty cells: '/' for
+bullish support (blue), '\\' for bearish resistance (red).
+"""
 import os
 import sys
 
+from . import trend
 from .chart import Chart
 
 GREEN = "\x1b[32m"
 RED = "\x1b[31m"
+BLUE = "\x1b[34m"
 RESET = "\x1b[0m"
 
 
@@ -40,23 +49,46 @@ def highlight(text: str, hexcode: str) -> str:
 def render(chart: Chart, max_cols: int = 25, color: bool | None = None) -> str:
     if color is None:
         color = color_enabled()
-    x_cell = f"{GREEN}X{RESET}" if color else "X"
-    o_cell = f"{RED}O{RESET}" if color else "O"
 
     cols = chart.columns[-max_cols:]
+    off = len(chart.columns) - len(cols)
     top = max(c.hi for c in cols)
     bot = min(c.lo for c in cols)
     close_idx = chart.ladder.floor(chart.last_close)
 
+    # (char, ansi-color) per cell; trend lines go in first so boxes win
+    grid = [[(".", None) for _ in cols] for _ in range(top - bot + 1)]
+    for ln in trend.lines(chart.columns):
+        ch, paint = ("/", BLUE) if ln.kind == "support" else ("\\", RED)
+        stop = len(chart.columns) if ln.end is None else ln.end
+        for k in range(max(ln.col, off), stop):
+            v = ln.at(k)
+            if bot <= v <= top:
+                grid[top - v][k - off] = (ch, paint)
+    for ci, c in enumerate(cols):
+        paint = GREEN if c.kind == "X" else RED
+        for idx in range(c.lo, c.hi + 1):
+            ch = chart.marks.get((off + ci, idx), "X" if c.kind == "X" else "O")
+            grid[top - idx][ci] = (ch, paint)
+
     lines = []
-    for idx in range(top, bot - 1, -1):
-        cells = []
-        for c in cols:
-            if c.lo <= idx <= c.hi:
-                cells.append(x_cell if c.kind == "X" else o_cell)
-            else:
-                cells.append(".")
+    for r, idx in enumerate(range(top, bot - 1, -1)):
+        cells = [f"{p}{ch}{RESET}" if color and p else ch for ch, p in grid[r]]
         label = f"{chart.ladder[idx]:>9.2f}"
         mark = f"  << {chart.last_close:.2f}" if idx == close_idx else ""
         lines.append(" ".join(cells) + label + mark)
+
+    width = 2 * len(cols) - 1
+    lines.append(("─" if color else "-") * width)
+    yrow = [" "] * width
+    for k, year in chart.years.items():
+        if k >= off:
+            pos = 2 * (k - off)
+            for j, ch in enumerate(year):
+                if pos + j < len(yrow):
+                    yrow[pos + j] = ch
+                else:
+                    yrow.append(ch)
+    if any(ch != " " for ch in yrow):
+        lines.append("".join(yrow).rstrip())
     return "\n".join(lines)

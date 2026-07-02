@@ -94,6 +94,43 @@ class TestSellPatterns(unittest.TestCase):
         self.assertEqual(c.signals[-1].kind, "sell")
 
 
+class TestTriangles(unittest.TestCase):
+    def test_bullish_triangle(self):
+        # lower X high (58 -> 56), higher O low (51 -> 52), upside resolution
+        c = chart(50, 58, 51, 56, 52, 57)
+        self.assertEqual([s.pattern for s in c.signals], ["Bullish Triangle"])
+
+    def test_bearish_triangle(self):
+        # higher O low (52 -> 54), lower X high (59 -> 58), downside resolution
+        c = chart(60, 52, 59, 54, 58, 53)
+        self.assertEqual([s.pattern for s in c.signals], ["Bearish Triangle"])
+
+
+class TestTraps(unittest.TestCase):
+    def test_bull_trap(self):
+        # triple top exceeded by exactly one box, then a 3-box reversal
+        c = chart(50, 55, 52, 55, 52, 56, 53)
+        self.assertEqual([(s.kind, s.pattern) for s in c.signals],
+                         [("buy", "Bull Trap")])
+
+    def test_bear_trap(self):
+        c = chart(60, 55, 58, 55, 58, 54, 57)
+        self.assertEqual([(s.kind, s.pattern) for s in c.signals],
+                         [("sell", "Bear Trap")])
+
+    def test_two_box_breakout_is_not_a_trap(self):
+        # breakout ran two boxes past the level before reversing: no trap
+        c = chart(50, 55, 52, 55, 52, 57, 54)
+        self.assertEqual(c.signals[-1].pattern, "Triple Top Breakout")
+
+    def test_trap_resolving_upward_is_a_catapult(self):
+        # a one-box triple-top breakout, reversal, then a fresh breakout:
+        # the initial breakout still counts as a catapult's first leg
+        c = chart(50, 55, 52, 55, 52, 56, 53, 57)
+        self.assertEqual([s.pattern for s in c.signals],
+                         ["Bull Trap", "Bullish Catapult"])
+
+
 class TestNonPatterns(unittest.TestCase):
     def test_pullback_breaking_down_voids_catapult(self):
         # triple top breakout, but the pullback breaks the prior O low: the

@@ -91,6 +91,8 @@ def _report(ch, an):
         print(f"P&F:        {pat} on {an.signal_date} "
               f"({an.status}, triggered at {an.trigger:.2f})")
     print(f"Status:     {an.status}")
+    if an.trend:
+        print(f"Trend:      {an.trend}")
     if an.objective is not None:
         active = "  (count column still active - objective may extend)" \
             if an.objective_active else ""

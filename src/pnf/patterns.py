@@ -21,11 +21,22 @@ Ascending Triple  — back-to-back Double Top Breakouts with a rising inner
                     Verified against StockCharts' _LRCX label of 2026-06-11,
                     which stays "Double Top Breakout" because the inner
                     O column had broken down.
+Triangle          — converging five-column formation: a lower X-column high
+                    and a higher O-column low, resolved by this breakout
+                    (Bullish Triangle) or breakdown (Bearish Triangle).
 Signal Reversed   — three successively lower O-column lows and two lower
                     X-column highs ended by this Double Top Breakout names it
                     Bearish Signal Reversed (mirror: Bullish Signal Reversed).
 Double            — everything else: the column simply crossed the prior
                     same-kind column's extreme.
+
+`check_trap` runs separately, when a reversal completes a column: a
+Triple/Quadruple/Spread Triple breakout that exceeded the broken level by
+exactly one box and then reversed is renamed Bull Trap (mirror: Bear Trap).
+The signal's kind is unchanged — StockCharts likewise keeps the chart on its
+buy/sell status and only relabels the pattern. A trap that later resolves
+with a fresh breakout completes a Catapult (a one-box initial breakout is
+still an initial breakout).
 
 Sell-side patterns are exact mirrors: levels are negated so "greater" always
 means "further in the signal direction" and one code path serves both sides.
@@ -38,8 +49,10 @@ _NAMES = {
         "quadruple": "Quadruple Top Breakout",
         "spread": "Spread Triple Top Breakout",
         "ascending": "Ascending Triple Top Breakout",
+        "triangle": "Bullish Triangle",
         "reversed": "Bearish Signal Reversed",
         "catapult": "Bullish Catapult",
+        "trap": "Bull Trap",
     },
     "sell": {
         "double": "Double Bottom Breakdown",
@@ -47,8 +60,10 @@ _NAMES = {
         "quadruple": "Quadruple Bottom Breakdown",
         "spread": "Spread Triple Bottom Breakdown",
         "ascending": "Descending Triple Bottom Breakdown",
+        "triangle": "Bearish Triangle",
         "reversed": "Bullish Signal Reversed",
         "catapult": "Bearish Catapult",
+        "trap": "Bear Trap",
     },
 }
 
@@ -71,7 +86,7 @@ def classify(columns, signals, kind: str) -> str:
                  and last.col_index == n - 2)
 
     if prev_here and last.pattern in (names["triple"], names["quadruple"],
-                                      names["spread"]):
+                                      names["spread"], names["trap"]):
         return names["catapult"]
     if n >= 6 and edge(columns[n - 4]) == level and edge(columns[n - 6]) == level:
         return names["quadruple"]
@@ -90,7 +105,29 @@ def classify(columns, signals, kind: str) -> str:
             and inner(columns[n - 1]) > inner(columns[n - 3]) \
             and not columns[n - 3].signaled:
         return names["ascending"]
+    if n >= 4 and edge(columns[n - 4]) > level \
+            and inner(columns[n - 1]) > inner(columns[n - 3]):
+        return names["triangle"]
     if n >= 5 and edge(columns[n - 4]) > level \
             and inner(columns[n - 5]) > inner(columns[n - 3]) > inner(columns[n - 1]):
         return names["reversed"]
     return names["double"]
+
+
+def check_trap(columns, signals, ladder):
+    """Called when a reversal has just completed columns[-2]. If that column
+    fired a multiple-top/bottom breakout and never extended past its trigger
+    box (exceeded the broken level by exactly one box), the reversal makes it
+    a trap — relabel the signal in place."""
+    if not signals:
+        return
+    s = signals[-1]
+    prev = columns[-2]
+    if s.col_index != len(columns) - 2:
+        return
+    names = _NAMES[s.kind]
+    if s.pattern not in (names["triple"], names["quadruple"], names["spread"]):
+        return
+    edge_idx = prev.hi if s.kind == "buy" else prev.lo
+    if ladder[edge_idx] == s.trigger:
+        s.pattern = names["trap"]

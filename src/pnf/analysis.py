@@ -23,6 +23,7 @@ completed X-column high (bearish).
 from dataclasses import asdict, dataclass
 
 from .chart import Chart
+from .trend import lines as trend_lines
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Analysis:
     risk: float | None = None
     rr: float | None = None
     note: str | None = None
+    trend: str | None = None  # active 45-degree line and its current level
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -48,10 +50,12 @@ class Analysis:
 
 def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
     close = round(chart.last_close, 2)
+    trend = _trend(chart)
     sig = chart.last_signal
     if sig is None:
         return Analysis(ticker, chart.last_date, close, "no signal",
-                        note="no breakout or breakdown in the loaded history")
+                        note="no breakout or breakdown in the loaded history",
+                        trend=trend)
 
     lad = chart.ladder
     obj_col = chart.columns[_measure_index(chart, sig.kind)] if method == "sc" \
@@ -101,8 +105,23 @@ def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
         stop=stop,
         reward=round(reward, 2),
         risk=round(risk, 2) if risk is not None else None,
-        rr=rr, note=note,
+        rr=rr, note=note, trend=trend,
     )
+
+
+def _trend(chart: Chart) -> str | None:
+    """The active 45-degree line at the last column. By construction the
+    chart sits above an unviolated support line / below a resistance line."""
+    tl = trend_lines(chart.columns)
+    if not tl:
+        return None
+    ln = tl[-1]
+    v = ln.at(len(chart.columns) - 1)
+    if v < 0:  # a falling resistance line ran off the bottom of the scale
+        return None
+    price = chart.ladder[v]
+    return (f"above bullish support line ({price:.2f})" if ln.kind == "support"
+            else f"below bearish resistance line ({price:.2f})")
 
 
 def _measure_index(chart: Chart, kind: str) -> int:

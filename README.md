@@ -8,7 +8,9 @@ and ranks setups by reward/risk. No LLM, no chart images — pure arithmetic.
 pip install -e .
 
 pnf LRCX                # analyze one ticker
-pnf LRCX --chart        # with an ASCII P&F chart (green X / red O in a terminal)
+pnf LRCX --chart        # ASCII P&F chart: green X / red O, month codes
+                        # (1-9, A/B/C) in the boxes, 45-degree trend lines,
+                        # year markers on the bottom axis
 pnf LRCX --json         # machine-readable
 pnf LRCX --explain      # pipe the numbers through `claude -p` for a writeup
 pnf scan                # scan the S&P 500, rank buy signals by R/R
@@ -23,6 +25,7 @@ Example:
 LRCX  2026-06-11  close 362.52
 P&F:        Double Top Breakout on 2026-06-11 (bullish, triggered at 352.00)
 Status:     bullish
+Trend:      above bullish support line (194.00)
 Objective:  439.00
 Stop:       316.00  (one box below last O-column low)
 Reward:     76.48
@@ -53,7 +56,19 @@ R/R:        1.64
   two lower highs ended by a double-top breakout) — plus the exact bearish
   mirrors (… Bottom Breakdown, Descending Triple Bottom, Bearish Catapult,
   Bullish Signal Reversed). The ascending "no breakdown inside" constraint
-  is verified against StockCharts' _LRCX label of 2026-06-11.
+  is verified against StockCharts' _LRCX label of 2026-06-11. Bullish /
+  Bearish Triangle: a lower X-column high converging with a higher O-column
+  low over five columns, resolved by the breakout. Bull / Bear Trap: a
+  triple-or-wider breakout that exceeded the level by exactly one box and
+  then reversed three boxes is relabeled in place — the signal's direction
+  stands (as on StockCharts) but the pattern warns; a trap that later
+  resolves with a fresh breakout completes a Catapult.
+- **Trend lines**: 45-degree lines, one box per column. Bullish support
+  starts one box below a significant bottom, bearish resistance one box
+  above a significant top; a violation flips to the opposite line anchored
+  at the extreme since the broken line began. The active line and its
+  current level are reported (`Trend:` / `trend` in JSON) and drawn on the
+  chart in blue `/` and red `\`.
 - **Objective** (default `sc`): StockCharts' automated Breakout Method,
   reverse-engineered to the dollar. The measure column is the first
   buy/sell-signal column after the most recent opposite signal (the column
@@ -78,7 +93,9 @@ R/R:        1.64
 engine reproduces stockcharts.com's chart from that day box-for-box: current
 X column 324–364, prior O-column low 320, Double Top Breakout 2026-06-11
 triggered at 352, stop 316, objective 456. `tests/test_patterns.py` covers
-the full pattern catalog on hand-traced synthetic charts.
+the full pattern catalog on hand-traced synthetic charts;
+`tests/test_trend_render.py` covers trend-line flips and the chart's month
+codes, bottom axis, and year markers.
 
 ```
 python -m unittest discover -s tests
