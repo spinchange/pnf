@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -133,7 +134,10 @@ def _explain(an):
         "objective is still active, stop distance, and what would invalidate "
         "it. No preamble.\n\n" + json.dumps(an.to_dict(), indent=2)
     )
-    subprocess.run([exe, "-p", prompt])
+    # Strip API-key auth so `claude` uses the claude.ai login (subscription
+    # billing, no connectors warning).
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    subprocess.run([exe, "-p", prompt], env=env)
 
 
 def _bpi(argv):
