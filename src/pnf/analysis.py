@@ -35,6 +35,8 @@ class Analysis:
     pattern: str | None = None
     signal_date: str | None = None
     trigger: float | None = None
+    alert: str | None = None       # standing High/Low Pole warning, if any
+    alert_date: str | None = None
     objective: float | None = None
     objective_active: bool = False  # count column still building; objective can move
     stop: float | None = None
@@ -54,9 +56,12 @@ def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
     trend = _trend(chart)
     ri = chart.reversal_idx
     rev = chart.ladder[ri] if ri is not None else None
+    al = chart.alert
+    alert, alert_date = (al.name, al.date) if al else (None, None)
     sig = chart.last_signal
     if sig is None:
         return Analysis(ticker, chart.last_date, close, "no signal",
+                        alert=alert, alert_date=alert_date,
                         note="no breakout or breakdown in the loaded history",
                         trend=trend, reversal=rev)
 
@@ -103,6 +108,7 @@ def analyze(chart: Chart, ticker: str = "", method: str = "sc") -> Analysis:
     return Analysis(
         ticker, chart.last_date, close, status,
         pattern=sig.pattern, signal_date=sig.date, trigger=sig.trigger,
+        alert=alert, alert_date=alert_date,
         objective=objective,
         objective_active=obj_col is chart.columns[-1],
         stop=stop,

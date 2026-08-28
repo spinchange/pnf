@@ -3,25 +3,47 @@
 Usage:
   pnf LRCX                 analyze one ticker
   pnf LRCX --chart         ... with an ASCII chart
+  pnf LRCX --txt           ... and save report + chart to a plain-text file
   pnf LRCX --json          machine-readable output
   pnf LRCX --explain       pipe the numbers through `claude -p` for a writeup
-  pnf scan                 scan the S&P 500, rank by reward/risk
-  pnf scan --top 10 --days 5
+  pnf scan                 scan the S&P 500: every ticker, ranked by R/R
+  pnf scan --top 10 --days 5 --side buy
+  pnf scan --csv           ... and save the table to a CSV file
   pnf scan snowball        scan the snowball sector-membership universe
   pnf scan xle             scan one sector's components
   pnf bpi                  S&P 500 bullish percent + all 11 sectors
   pnf bpi xle --chart      one sector's BPI with its P&F chart
+  pnf bpi --txt --csv      save BPI report/chart (.txt) and sector table (.csv)
 """
 import argparse
+import contextlib
+import csv
+import io
 import json
 import shutil
 import subprocess
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 from . import analysis, bpi as bpimod, chart as chartmod, data, render
 
 GOLD = "#D4AF37"
+
+
+def _capture(fn) -> str:
+    """fn()'s stdout as a string. The buffer is not a TTY, so every
+    color_enabled() check inside comes back False — plain text, file-safe."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn()
+    return buf.getvalue()
+
+
+def _write_file(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"wrote {path}", file=sys.stderr)
 
 
 def main(argv=None):
@@ -49,6 +71,9 @@ def _ticker(argv):
                    help="price objective method: sc = StockCharts breakout "
                         "method (default), classic = Dorsey vertical count")
     p.add_argument("--chart", action="store_true", help="print ASCII P&F chart")
+    p.add_argument("--txt", nargs="?", const=True, metavar="FILE",
+                   help="write the report and chart to a plain-text file "
+                        "(default name TICKER-pnf-DATE.txt)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--explain", action="store_true",
                    help="send the computed numbers to `claude -p` for analysis")
@@ -67,6 +92,15 @@ def _ticker(argv):
         if a.chart:
             print()
             print(render.render(ch))
+    if a.txt:
+        path = a.txt if isinstance(a.txt, str) \
+            else f"{an.ticker}-pnf-{an.date}.txt"
+
+        def _plain():
+            _report(ch, an)
+            print()
+            print(render.render(ch, color=False))
+        _write_file(path, _capture(_plain))
     if a.explain:
         _explain(an)
     return 0
@@ -96,6 +130,10 @@ def _report(ch, an):
         pat = _paint(an.pattern, an.status, render.color_enabled())
         print(f"P&F:        {pat} on {an.signal_date} "
               f"({an.status}, triggered at {an.trigger:.2f})")
+    if an.alert:
+        side = "bearish" if an.alert.startswith("High Pole") else "bullish"
+        warn = _paint(an.alert, side, render.color_enabled())
+        print(f"Alert:      {warn} on {an.alert_date}")
     print(f"Status:     {an.status}")
     if an.trend:
         print(f"Trend:      {an.trend}")
@@ -145,10 +183,20 @@ def _bpi(argv):
     p.add_argument("--chart", action="store_true",
                    help="print the BPI's own P&F chart")
     p.add_argument("--limit", type=int, help="only scan the first N tickers")
+    p.add_argument("--txt", nargs="?", const=True, metavar="FILE",
+                   help="write the BPI report and its P&F chart to a "
+                        "plain-text file (default name pnf-bpi-DATE.txt)")
+    p.add_argument("--csv", nargs="?", const=True, metavar="FILE",
+                   help="write the sector table to a CSV file "
+                        "(default name pnf-bpi-DATE.csv)")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
-    members = data.snowball()
+    try:
+        members = data.snowball()
+    except data.DataError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     if a.sector:
         etf = a.sector.upper()
         if etf not in members:
@@ -191,36 +239,60 @@ def _bpi(argv):
                 for etf, b in sectors]
         print(json.dumps(out, indent=2))
     else:
-        color = render.color_enabled()
-        col = top.chart.columns[-1].kind
-        print(f"{top.name} Bullish Percent  as of {top.chart.last_date}")
-        print(f"BPI:     {top.pct:.1f}%  ({top.bullish}/{top.members} "
-              "on buy signals)")
-        print(f"Status:  {_paint_bpi(top.status, color)}  ({col} column)")
-        if not a.sector:
-            print()
-            header = (f"{'Sector':<23} {'  ' if color else ''}{'BPI':>6} "
-                      f"{'Col':^4} {'Status':<16} {'Bulls':>8}")
-            print(header)
-            for etf, b in sectors:
-                name, hexcode = data.SECTOR_ETFS[etf]
-                sec = f"{name:<23}"
-                if color:
-                    sec = render.paint_hex(sec, hexcode)
-                    tri = "▲ " if b.status.startswith("Bull") else "▼ "
-                else:
-                    tri = ""
-                print(f"{sec} {tri}{b.pct:>6.1f} "
-                      f"{b.chart.columns[-1].kind:^4} "
-                      f"{_paint_bpi(f'{b.status:<16}', color)} "
-                      f"{f'{b.bullish}/{b.members}':>8}")
-        if a.chart:
-            print()
-            print(render.render(top.chart))
+        _bpi_report(top, sectors, show_table=not a.sector, show_chart=a.chart)
+    if a.txt:
+        etf = f"-{a.sector.lower()}" if a.sector else ""
+        path = a.txt if isinstance(a.txt, str) \
+            else f"pnf-bpi{etf}-{top.chart.last_date}.txt"
+        _write_file(path, _capture(lambda: _bpi_report(
+            top, sectors, show_table=not a.sector, show_chart=True)))
+    if a.csv:
+        path = a.csv if isinstance(a.csv, str) \
+            else f"pnf-bpi-{top.chart.last_date}.csv"
+        rows = [("", top.name, top)] if not a.sector else []
+        rows += [(etf, data.SECTOR_ETFS[etf][0], b) for etf, b in sectors]
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["etf", "name", "date", "bpi", "column", "status",
+                        "bullish", "members"])
+            for etf, name, b in rows:
+                w.writerow([etf, name, b.chart.last_date, b.pct,
+                            b.chart.columns[-1].kind, b.status,
+                            b.bullish, b.members])
+        print(f"wrote {path}", file=sys.stderr)
     if failed:
         print(f"({len(failed)} tickers failed: {', '.join(failed[:10])}"
               f"{'...' if len(failed) > 10 else ''})", file=sys.stderr)
     return 0
+
+
+def _bpi_report(top, sectors, show_table: bool, show_chart: bool) -> None:
+    color = render.color_enabled()
+    col = top.chart.columns[-1].kind
+    print(f"{top.name} Bullish Percent  as of {top.chart.last_date}")
+    print(f"BPI:     {top.pct:.1f}%  ({top.bullish}/{top.members} "
+          "on buy signals)")
+    print(f"Status:  {_paint_bpi(top.status, color)}  ({col} column)")
+    if show_table:
+        print()
+        header = (f"{'Sector':<23} {'  ' if color else ''}{'BPI':>6} "
+                  f"{'Col':^4} {'Status':<16} {'Bulls':>8}")
+        print(header)
+        for etf, b in sectors:
+            name, hexcode = data.SECTOR_ETFS[etf]
+            sec = f"{name:<23}"
+            if color:
+                sec = render.paint_hex(sec, hexcode)
+                tri = "▲ " if b.status.startswith("Bull") else "▼ "
+            else:
+                tri = ""
+            print(f"{sec} {tri}{b.pct:>6.1f} "
+                  f"{b.chart.columns[-1].kind:^4} "
+                  f"{_paint_bpi(f'{b.status:<16}', color)} "
+                  f"{f'{b.bullish}/{b.members}':>8}")
+    if show_chart:
+        print()
+        print(render.render(top.chart))
 
 
 def _paint_bpi(status: str, enabled: bool) -> str:
@@ -236,29 +308,37 @@ def _scan(argv):
                    help="'sp500' (Wikipedia), 'sectors' (SPDR sector ETFs), "
                         "'snowball' (sector-membership CSVs), a sector ETF "
                         "(e.g. xle), or a path to a file of tickers")
-    p.add_argument("--top", type=int, default=20)
+    p.add_argument("--top", type=int,
+                   help="show only the best N by R/R (default: every ticker)")
     p.add_argument("--limit", type=int, help="only scan the first N tickers")
     p.add_argument("--days", type=int,
                    help="only signals fired within the last N calendar days")
-    p.add_argument("--side", choices=["buy", "sell", "both"], default="buy")
+    p.add_argument("--side", choices=["buy", "sell", "both"], default="both")
     p.add_argument("--range", default="5y")
     p.add_argument("--reversal", type=int, default=3)
     p.add_argument("--objective", choices=["sc", "classic"], default="sc")
+    p.add_argument("--csv", nargs="?", const=True, metavar="FILE",
+                   help="write the results to a CSV file "
+                        "(default name pnf-scan-UNIVERSE-DATE.csv)")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
     u = a.universe.lower()
-    if u == "sp500":
-        tickers = data.sp500()
-    elif u == "sectors":
-        tickers = data.SECTORS
-    elif u == "snowball":
-        tickers = sorted({t for ts in data.snowball().values() for t in ts})
-    elif u.upper() in data.SECTOR_ETFS:
-        tickers = data.sector_components(u)
-    else:
-        with open(a.universe) as f:
-            tickers = [t.strip().upper() for t in f if t.strip()]
+    try:
+        if u == "sp500":
+            tickers = data.sp500()
+        elif u == "sectors":
+            tickers = data.SECTORS
+        elif u == "snowball":
+            tickers = sorted({t for ts in data.snowball().values() for t in ts})
+        elif u.upper() in data.SECTOR_ETFS:
+            tickers = data.sector_components(u)
+        else:
+            with open(a.universe) as f:
+                tickers = [t.strip().upper() for t in f if t.strip()]
+    except (data.DataError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     if a.limit:
         tickers = tickers[: a.limit]
 
@@ -277,14 +357,15 @@ def _scan(argv):
             continue
         if a.side == "both" and an.status not in ("bullish", "bearish"):
             continue
-        if an.rr is None:
-            continue
         if cutoff and an.signal_date < cutoff:
             continue
         rows.append(an)
 
-    rows.sort(key=lambda r: r.rr, reverse=True)
-    rows = rows[: a.top]
+    # rankable setups first (R/R descending), then rows with no R/R
+    # (already past the objective / through the stop / no stop reference)
+    rows.sort(key=lambda r: (r.rr is None, -(r.rr or 0.0)))
+    if a.top:
+        rows = rows[: a.top]
 
     if a.json:
         print(json.dumps([r.to_dict() for r in rows], indent=2))
@@ -316,8 +397,8 @@ def _scan(argv):
             cells += [f"{r.close:>9.2f}",
                       _paint(f"{r.pattern:<34}", r.status, color),
                       f"{r.signal_date:<11}",
-                      f"{r.objective:>9.2f}", f"{r.stop:>9.2f}",
-                      f"{r.rr:>6.2f}"]
+                      _num(r.objective, 9), _num(r.stop, 9),
+                      _num(r.rr, 6)]
             lines.append(" ".join(cells))
         if color:
             # gold frame; plain (piped/NO_COLOR) output stays bare so it
@@ -331,10 +412,23 @@ def _scan(argv):
         else:
             for ln in lines:
                 print(ln)
+    if a.csv:
+        path = a.csv if isinstance(a.csv, str) \
+            else f"pnf-scan-{Path(a.universe).stem.lower()}-{date.today()}.csv"
+        fieldnames = list(analysis.Analysis.__dataclass_fields__)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames)
+            w.writeheader()
+            w.writerows(r.to_dict() for r in rows)
+        print(f"wrote {path}", file=sys.stderr)
     if failed:
         print(f"({len(failed)} tickers failed: {', '.join(failed[:10])}"
               f"{'...' if len(failed) > 10 else ''})", file=sys.stderr)
     return 0
+
+
+def _num(v, width: int) -> str:
+    return f"{v:>{width}.2f}" if v is not None else " " * width
 
 
 if __name__ == "__main__":

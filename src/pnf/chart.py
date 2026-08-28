@@ -7,7 +7,7 @@ reversal. Mirror logic for O columns. Extension always beats reversal.
 from dataclasses import dataclass, field
 
 from .boxes import Ladder
-from .patterns import check_trap, classify
+from .patterns import check_pole, check_trap, classify
 
 MONTH_CODES = "123456789ABC"  # Jan-Sep, A=Oct B=Nov C=Dec (traditional)
 
@@ -32,6 +32,15 @@ class Signal:
 
 
 @dataclass
+class Alert:
+    """A dated warning pattern (High/Low Pole) — not a signal: it never
+    changes the chart's buy/sell status and stays out of Chart.signals."""
+    name: str        # "High Pole Warning" or "Low Pole Reversal"
+    date: str
+    col_index: int   # column whose retracement fired the alert
+
+
+@dataclass
 class Chart:
     ladder: Ladder
     columns: list[Column]
@@ -43,11 +52,25 @@ class Chart:
     marks: dict[tuple[int, int], str] = field(default_factory=dict)
     # column index -> "YYYY" where a new year first printed a box
     years: dict[int, str] = field(default_factory=dict)
+    alerts: list[Alert] = field(default_factory=list)
     reversal: int = 3
 
     @property
     def last_signal(self) -> Signal | None:
         return self.signals[-1] if self.signals else None
+
+    @property
+    def alert(self) -> Alert | None:
+        """The standing alert: the most recent High/Low Pole event, unless a
+        signal has fired since (same column and later, or any later column) —
+        a real breakout/breakdown supersedes the warning."""
+        if not self.alerts:
+            return None
+        al = self.alerts[-1]
+        s = self.last_signal
+        if s and (s.col_index, s.date) >= (al.col_index, al.date):
+            return None
+        return al
 
     @property
     def reversal_idx(self) -> int | None:
@@ -74,6 +97,7 @@ def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
     kind = "X" if c0 >= (h0 + l0) / 2 else "O"
     columns = [Column(kind, hi, lo, d0, d0)]
     signals: list[Signal] = []
+    alerts: list[Alert] = []
     marks: dict[tuple[int, int], str] = {}
     years: dict[int, str] = {}
     last_ym = d0[:7]  # "YYYY-MM" of the last printed box
@@ -98,6 +122,7 @@ def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
                 col.hi, col.end = nh, date
                 stamp(date, first)
                 _check_buy(columns, signals, ladder, date)
+                _check_pole(columns, alerts, ladder, date)
             else:
                 nl = ladder.ceil(l)
                 if col.hi - nl >= reversal:
@@ -105,6 +130,7 @@ def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
                     stamp(date, col.hi - 1)
                     check_trap(columns, signals, ladder)
                     _check_sell(columns, signals, ladder, date)
+                    _check_pole(columns, alerts, ladder, date)
         else:
             nl = ladder.ceil(l)
             if nl < col.lo:
@@ -112,6 +138,7 @@ def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
                 col.lo, col.end = nl, date
                 stamp(date, first)
                 _check_sell(columns, signals, ladder, date)
+                _check_pole(columns, alerts, ladder, date)
             else:
                 nh = ladder.floor(h)
                 if nh - col.lo >= reversal:
@@ -119,9 +146,10 @@ def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
                     stamp(date, col.lo + 1)
                     check_trap(columns, signals, ladder)
                     _check_buy(columns, signals, ladder, date)
+                    _check_pole(columns, alerts, ladder, date)
 
     return Chart(ladder, columns, signals, bars[-1][0], bars[-1][3],
-                 marks, years, reversal)
+                 marks, years, alerts, reversal)
 
 
 def _check_buy(columns, signals, ladder, date):
@@ -132,6 +160,15 @@ def _check_buy(columns, signals, ladder, date):
     cur.signaled = True
     signals.append(Signal("buy", classify(columns, signals, "buy"), date,
                           ladder[columns[n - 2].hi + 1], n))
+
+
+def _check_pole(columns, alerts, ladder, date):
+    n = len(columns) - 1
+    if alerts and alerts[-1].col_index == n:
+        return  # this column already alerted
+    name = check_pole(columns, ladder)
+    if name:
+        alerts.append(Alert(name, date, n))
 
 
 def _check_sell(columns, signals, ladder, date):

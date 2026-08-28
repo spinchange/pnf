@@ -3,3 +3,11 @@ __pycache__/
 build/
 dist/
 .venv/
+
+# generated report/scan output (--txt, --csv)
+*-pnf.csv
+*-pnf-*.csv
+*-pnf-*.txt
+pnf-scan-*.csv
+pnf-bpi-*.csv
+pnf-bpi-*.txt

@@ -11,16 +11,23 @@ pnf LRCX                # analyze one ticker
 pnf LRCX --chart        # ASCII P&F chart: green X / red O, month codes
                         # (1-9, A/B/C) in the boxes, 45-degree trend lines,
                         # year markers on the bottom axis
+pnf LRCX --txt          # save report + chart to LRCX-pnf-DATE.txt
+                        # (or --txt myfile.txt); plain text, no ANSI colors
 pnf LRCX --json         # machine-readable
 pnf LRCX --explain      # pipe the numbers through `claude -p` for a writeup
-pnf scan                # scan the S&P 500, rank buy signals by R/R
-pnf scan --top 10 --days 7 --side both
-pnf scan sectors --side both    # rank the 11 SPDR sector ETFs
+pnf scan                # scan the S&P 500: every ticker with a signal,
+                        # buys and sells, ranked by R/R
+pnf scan --top 10 --days 7 --side buy
+pnf scan --csv          # save results to pnf-scan-sp500-DATE.csv
+                        # (or --csv myfile.csv); all analysis fields
+pnf scan sectors        # rank the 11 SPDR sector ETFs
 pnf scan snowball       # scan the snowball sector-membership universe
 pnf scan xle            # scan one sector's components
 pnf scan mylist.txt     # custom universe, one ticker per line
 pnf bpi                 # S&P 500 bullish percent + all 11 sectors
 pnf bpi xle --chart     # one sector's BPI with its own P&F chart
+pnf bpi --txt --csv     # save report + BPI chart to pnf-bpi-DATE.txt and
+                        # the sector table to pnf-bpi-DATE.csv
 ```
 
 Example:
@@ -68,6 +75,16 @@ R/R:        1.64
   then reversed three boxes is relabeled in place — the signal's direction
   stands (as on StockCharts) but the pattern warns; a trap that later
   resolves with a fresh breakout completes a Catapult.
+- **Alerts**: High Pole Warning / Low Pole Reversal — dated warnings, not
+  signals. A pole is a column that beat the previous same-kind extreme by at
+  least 3 boxes; the alert fires when the current reversal column has given
+  back at least 50% of the pole's run *beyond that extreme* (measured in
+  price above/below the broken level, not against the whole pole column —
+  the measure that reproduces StockCharts' `_SPGI` High Pole Warning of
+  2026-07-09 to the day). Shown as `Alert:` in the report and
+  `alert`/`alert_date` in JSON and scan CSVs; superseded by the next signal.
+  Alerts never enter the signal history, so patterns, objectives, stops, and
+  the BPI are entirely unaffected.
 - **Trend lines**: 45-degree lines, one box per column. Bullish support
   starts one box below a significant bottom, bearish resistance one box
   above a significant top; a violation flips to the opposite line anchored
@@ -118,7 +135,7 @@ R/R:        1.64
 engine reproduces stockcharts.com's chart from that day box-for-box: current
 X column 324–364, prior O-column low 320, Double Top Breakout 2026-06-11
 triggered at 352, stop 316, objective 456. `tests/test_patterns.py` covers
-the full pattern catalog on hand-traced synthetic charts;
+the full pattern catalog and the pole alerts on hand-traced synthetic charts;
 `tests/test_trend_render.py` covers trend-line flips and the chart's month
 codes, bottom axis, and year markers. `tests/test_bpi.py` covers the BPI
 series aggregation, all six state readings, and the snowball universe

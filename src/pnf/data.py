@@ -135,3 +135,5 @@ def sp500() -> list[str]:
         raise DataError(f"S&P 500 list looks wrong ({len(out)} symbols) - "
                         "Wikipedia layout may have changed")
     return out
+
+

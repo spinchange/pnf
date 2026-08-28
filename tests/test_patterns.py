@@ -158,3 +158,49 @@ class TestNonPatterns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPoleAlerts(unittest.TestCase):
+    """High Pole Warning / Low Pole Reversal — alerts, not signals: the
+    signal history must be untouched (the BPI counts it)."""
+
+    def test_high_pole_fires_at_half_the_pole(self):
+        # pole X 53-62 tops the prior X high (55) by 7 boxes; the O column
+        # must give back half the 7-point rise above 55: 59 misses (3), 58
+        # crosses (4)
+        c = chart(50, 55, 52, 62, 59, 58)
+        self.assertEqual(c.alert.name, "High Pole Warning")
+        self.assertEqual(c.alert.date, "2026-01-06")
+        self.assertEqual([s.pattern for s in c.signals], ["Double Top Breakout"])
+
+    def test_no_alert_below_half(self):
+        c = chart(50, 55, 52, 62, 59)
+        self.assertIsNone(c.alert)
+        self.assertEqual(c.alerts, [])
+
+    def test_high_pole_on_the_reversal_itself(self):
+        # a 3-box pole: the 3-box reversal alone already retraces half
+        c = chart(50, 55, 52, 58, 55)
+        self.assertEqual(c.alert.name, "High Pole Warning")
+
+    def test_breakdown_supersedes_high_pole(self):
+        # the same O column then breaks the prior O low: a real sell signal
+        # replaces the warning
+        c = chart(50, 55, 52, 62, 59, 58, 51)
+        self.assertIsNone(c.alert)
+        self.assertEqual(c.signals[-1].pattern, "Double Bottom Breakdown")
+        # the alert stays on record, dated before the breakdown
+        self.assertEqual(c.alerts[-1].name, "High Pole Warning")
+
+    def test_low_pole_reversal(self):
+        # pole O 48-57 undercuts the prior O low (55) by 7 boxes; the X
+        # column retraces half the fall below 55: 51 misses (3), 53 crosses
+        c = chart(60, 55, 58, 48, 51, 53)
+        self.assertEqual(c.alert.name, "Low Pole Reversal")
+        self.assertEqual(c.signals[-1].pattern, "Double Bottom Breakdown")
+
+    def test_short_pole_never_alerts(self):
+        # breakout of only 2 boxes above the prior top is not a pole
+        c = chart(50, 55, 52, 57, 54)
+        self.assertIsNone(c.alert)
+        self.assertEqual(c.alerts, [])

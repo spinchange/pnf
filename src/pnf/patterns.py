@@ -38,6 +38,17 @@ buy/sell status and only relabels the pattern. A trap that later resolves
 with a fresh breakout completes a Catapult (a one-box initial breakout is
 still an initial breakout).
 
+`check_pole` detects the alert patterns — dated warnings, not signals; they
+never enter the signal history (which the BPI and the catapult/ascending
+lookbacks depend on). High Pole Warning: the prior X column topped the
+previous X column by at least 3 boxes (the pole), and the current unsignaled
+O column has retraced at least 50% of the pole's rise above that previous
+top. Low Pole Reversal is the exact mirror. The 50% is measured in price
+above the previous same-kind extreme — not against the whole pole column —
+verified against StockCharts' _SPGI "High Pole Warning" of 2026-07-09
+(pole 380-448 over a 412 prior top: fired at the 424 box, 24 of 36 points
+retraced; the whole-column measure would have needed 412 and never fired).
+
 Sell-side patterns are exact mirrors: levels are negated so "greater" always
 means "further in the signal direction" and one code path serves both sides.
 """
@@ -131,3 +142,27 @@ def check_trap(columns, signals, ladder):
     edge_idx = prev.hi if s.kind == "buy" else prev.lo
     if ladder[edge_idx] == s.trigger:
         s.pattern = names["trap"]
+
+
+def check_pole(columns, ladder) -> str | None:
+    """Alert-pattern check on the current column (see module docstring).
+    Returns the alert name, or None. Never fires on a column that has
+    signaled — a real breakout/breakdown supersedes the warning."""
+    n = len(columns) - 1
+    cur = columns[n]
+    if cur.signaled or n < 3:
+        return None
+    pole, prev = columns[n - 1], columns[n - 3]
+    if cur.kind == "O":
+        if pole.hi - prev.hi < 3:
+            return None
+        rise = ladder[pole.hi] - ladder[prev.hi]
+        if ladder[pole.hi] - ladder[cur.lo] >= 0.5 * rise:
+            return "High Pole Warning"
+    else:
+        if prev.lo - pole.lo < 3:
+            return None
+        fall = ladder[prev.lo] - ladder[pole.lo]
+        if ladder[cur.hi] - ladder[pole.lo] >= 0.5 * fall:
+            return "Low Pole Reversal"
+    return None
