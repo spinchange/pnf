@@ -14,6 +14,9 @@ Usage:
   pnf bpi                  S&P 500 bullish percent + all 11 sectors
   pnf bpi xle --chart      one sector's BPI with its P&F chart
   pnf bpi --txt --csv      save BPI report/chart (.txt) and sector table (.csv)
+  pnf rs NVDA              relative strength: NVDA vs its sector, sector vs SPY
+  pnf rs NVDA --vs QQQ     ... vs an explicit benchmark
+  pnf rs xlv --chart       one sector's RS vs SPY, with the ratio chart
 """
 import argparse
 import contextlib
@@ -27,7 +30,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import analysis, bpi as bpimod, chart as chartmod, data, render
+from . import analysis, bpi as bpimod, chart as chartmod, data, render, rs
 
 GOLD = "#D4AF37"
 
@@ -53,6 +56,8 @@ def main(argv=None):
         return _scan(argv[1:])
     if argv and argv[0].lower() == "bpi":
         return _bpi(argv[1:])
+    if argv and argv[0].lower() == "rs":
+        return _rs(argv[1:])
     return _ticker(argv)
 
 
@@ -103,7 +108,13 @@ def _ticker(argv):
             print(render.render(ch, color=False))
         _write_file(path, _capture(_plain))
     if a.explain:
-        _explain(an)
+        _explain(
+            "You are reviewing a Point & Figure setup. The numbers below were "
+            "computed deterministically (traditional scale, 3-box reversal, "
+            "vertical-count objective, stop = opposite-signal box). In a short "
+            "paragraph, assess the setup: entry vs trigger box, whether the "
+            "objective is still active, stop distance, and what would "
+            "invalidate it. No preamble.", an.to_dict())
     return 0
 
 
@@ -159,23 +170,125 @@ def _report(ch, an):
         print(f"Note:       {an.note}")
 
 
-def _explain(an):
+def _explain(intro: str, payload) -> None:
     exe = shutil.which("claude")
     if not exe:
         print("--explain needs the `claude` CLI on PATH", file=sys.stderr)
         return
-    prompt = (
-        "You are reviewing a Point & Figure setup. The numbers below were "
-        "computed deterministically (traditional scale, 3-box reversal, "
-        "vertical-count objective, stop = opposite-signal box). In a short "
-        "paragraph, assess the setup: entry vs trigger box, whether the "
-        "objective is still active, stop distance, and what would invalidate "
-        "it. No preamble.\n\n" + json.dumps(an.to_dict(), indent=2)
-    )
+    prompt = intro + "\n\n" + json.dumps(payload, indent=2)
     # Strip API-key auth so `claude` uses the claude.ai login (subscription
     # billing, no connectors warning).
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     subprocess.run([exe, "-p", prompt], env=env)
+
+
+def _rs(argv):
+    p = argparse.ArgumentParser(prog="pnf rs")
+    p.add_argument("ticker", help="stock or sector ETF")
+    p.add_argument("--vs", help="benchmark ticker; default: the stock's "
+                                "sector ETF plus that ETF vs SPY, or SPY "
+                                "for a sector ETF")
+    p.add_argument("--range", default="5y")
+    p.add_argument("--box", type=float, default=rs.BOX_PCT * 100,
+                   help="box size in percent (default 2)")
+    p.add_argument("--reversal", type=int, default=3)
+    p.add_argument("--chart", action="store_true",
+                   help="print the ratio's P&F chart")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--explain", action="store_true",
+                   help="send the RS readings to `claude -p` for analysis")
+    a = p.parse_args(argv)
+
+    t = a.ticker.upper()
+    note = None
+    if a.vs:
+        pairs = [(t, a.vs.upper())]
+    elif t in data.SECTOR_ETFS:
+        pairs = [(t, rs.MARKET)]
+    else:
+        try:
+            etf = rs.sector_of().get(t)
+        except data.DataError:
+            etf = None
+        if etf:
+            pairs = [(t, etf), (etf, rs.MARKET)]
+        else:
+            note = f"{t} not in any snowball sector CSV - comparing to {rs.MARKET}"
+            pairs = [(t, rs.MARKET)]
+
+    results = []
+    for num, den in pairs:
+        try:
+            ch = rs.build(data.fetch_daily(num, a.range),
+                          data.fetch_daily(den, a.range),
+                          a.reversal, a.box / 100)
+        except data.DataError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        results.append((num, den, ch))
+
+    if a.json:
+        print(json.dumps([_rs_dict(n, d, ch) for n, d, ch in results],
+                         indent=2))
+    else:
+        for i, (num, den, ch) in enumerate(results):
+            if i:
+                print()
+            _rs_report(num, den, ch)
+            if a.chart:
+                print()
+                print(render.render(ch))
+    if note:
+        print(f"({note})", file=sys.stderr)
+    if a.explain:
+        _explain(
+            "You are reading Point & Figure relative-strength charts "
+            "(Dorsey Wright convention: close ratio x 100, log-scale boxes, "
+            "3-box reversal; the last signal is the long-term RS view, the "
+            "current column the short-term one, and RS signals typically "
+            "persist for years). In a short paragraph, read the leadership "
+            "picture across the pairs below: who is leading whom, whether "
+            "the reading is fresh or extended, and what ratio level would "
+            "change it. No preamble.",
+            [_rs_dict(n, d, ch) for n, d, ch in results])
+    return 0
+
+
+def _rs_dict(num, den, ch):
+    sig = ch.last_signal
+    status, reading = rs.verdict(ch)
+    col = ch.columns[-1]
+    ridx = ch.reversal_idx
+    return {
+        "pair": f"{num}/{den}",
+        "date": ch.last_date,
+        "ratio": round(ch.last_close, 2),
+        "status": status,
+        "signal": sig.kind if sig else None,
+        "pattern": sig.pattern if sig else None,
+        "signal_date": sig.date if sig else None,
+        "column": col.kind,
+        "column_since": col.start,
+        "reading": reading,
+        "reversal": ch.ladder[ridx] if ridx is not None else None,
+    }
+
+
+def _rs_report(num, den, ch):
+    d = _rs_dict(num, den, ch)
+    color = render.color_enabled()
+    print(f"{num} / {den}   RS {d['ratio']:.2f}  as of {d['date']}")
+    if d["pattern"]:
+        pat = _paint(f"RS {d['signal']} - {d['pattern']}", d["status"], color)
+        print(f"Signal:     {pat} on {d['signal_date']}")
+    else:
+        print("Signal:     none yet")
+    side = "outperforming" if d["column"] == "X" else "underperforming"
+    print(f"Column:     {d['column']} since {d['column_since']}  "
+          f"({side} {den} near term)")
+    print(f"Verdict:    {_paint(d['reading'], d['status'], color)}")
+    if d["reversal"] is not None:
+        print(f"Reversal:   {d['reversal']:.2f} flips the column")
 
 
 def _bpi(argv):

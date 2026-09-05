@@ -28,6 +28,9 @@ pnf bpi                 # S&P 500 bullish percent + all 11 sectors
 pnf bpi xle --chart     # one sector's BPI with its own P&F chart
 pnf bpi --txt --csv     # save report + BPI chart to pnf-bpi-DATE.txt and
                         # the sector table to pnf-bpi-DATE.csv
+pnf rs NVDA             # relative strength: NVDA vs its sector + sector vs SPY
+pnf rs NVDA --vs QQQ    # ... vs an explicit benchmark
+pnf rs xlv --chart      # one sector's RS vs SPY, with the ratio chart
 ```
 
 Example:
@@ -129,6 +132,19 @@ R/R:        1.64
   readings, don't backtest); small sectors are coarse (21 energy names =
   4.76 points per stock).
 
+- **Relative strength** (`pnf rs`, Dorsey Wright convention): the close
+  ratio numerator/denominator × 100, charted close-only with 3-box reversal
+  on a **log-scale grid** — each box 2% above the one below (`--box` to
+  change), since a ratio has no natural dollar scale. For a stock, the
+  sector is looked up in the snowball membership CSVs and two charts are
+  produced: stock ÷ sector ETF and sector ETF ÷ SPY (`--vs` overrides; a
+  sector ETF charts straight against SPY). Read on two clocks: the latest
+  P&F signal on the ratio chart is the long-term view (RS signals
+  historically persist for years), the current column the short-term one —
+  buy + X = leader, buy + O = leader pausing, sell + X = laggard bouncing,
+  sell + O = laggard. The reported reversal level is the ratio that flips
+  the column.
+
 ## Validation
 
 `tests/test_lrcx.py` freezes LRCX history through 2026-06-11 and asserts the
@@ -139,7 +155,8 @@ the full pattern catalog and the pole alerts on hand-traced synthetic charts;
 `tests/test_trend_render.py` covers trend-line flips and the chart's month
 codes, bottom axis, and year markers. `tests/test_bpi.py` covers the BPI
 series aggregation, all six state readings, and the snowball universe
-loader.
+loader. `tests/test_rs.py` covers the log-scale ladder, ratio-series date
+alignment, and all RS verdict states.
 
 ```
 python -m unittest discover -s tests

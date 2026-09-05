@@ -82,13 +82,15 @@ class Chart:
         return idx if idx >= 0 else None
 
 
-def build(bars, reversal: int = 3, box: float | None = None) -> Chart:
+def build(bars, reversal: int = 3, box: float | None = None,
+          pct: float | None = None) -> Chart:
     """bars: iterable of (date, high, low, close), oldest first.
-    `box` switches to a fixed box size (see Ladder)."""
+    `box` switches to a fixed box size, `pct` to a log-scale grid
+    (see Ladder)."""
     bars = list(bars)
     if not bars:
         raise ValueError("no price data")
-    ladder = Ladder(max(b[1] for b in bars), box)
+    ladder = Ladder(max(b[1] for b in bars), box, pct)
 
     d0, h0, l0, c0 = bars[0]
     hi, lo = ladder.floor(h0), ladder.ceil(l0)
