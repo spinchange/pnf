@@ -58,6 +58,9 @@ def main(argv=None):
         return _bpi(argv[1:])
     if argv and argv[0].lower() == "rs":
         return _rs(argv[1:])
+    if argv and argv[0].lower() == "showcase":
+        from . import showcase
+        return showcase.main(argv[1:])
     return _ticker(argv)
 
 

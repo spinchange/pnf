@@ -11,3 +11,5 @@ dist/
 pnf-scan-*.csv
 pnf-bpi-*.csv
 pnf-bpi-*.txt
+pnf-showcase-*.csv
+pnf-showcase-*.txt

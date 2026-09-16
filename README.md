@@ -31,6 +31,9 @@ pnf bpi --txt --csv     # save report + BPI chart to pnf-bpi-DATE.txt and
 pnf rs NVDA             # relative strength: NVDA vs its sector + sector vs SPY
 pnf rs NVDA --vs QQQ    # ... vs an explicit benchmark
 pnf rs xlv --chart      # one sector's RS vs SPY, with the ratio chart
+pnf showcase            # quality businesses (snowball's judgment) ranked by
+                        # how good their P&F chart looks; --chart, --csv, --txt
+pnf showcase showpieces --sort combined --top 10
 ```
 
 Example:
@@ -145,6 +148,24 @@ R/R:        1.64
   sell + O = laggard. The reported reversal level is the ratio that flips
   the column.
 
+- **Showcase** (`pnf showcase`): two axes kept separate. *Business
+  quality* is read at run time from the snowball vault (`PNF_SNOWBALL`):
+  the hand-argued showpieces table in `dossiers/_comparisons.md` and the
+  Snowball 30 composite ranking (`reports/snowball30_composite.sql` run
+  read-only against `facts/facts.duckdb`, needs `duckdb`). *Chart shape* is
+  a 0–100 score from the chart alone: bullish status (20), price above the
+  bullish support line (15) and how many years that line has held (10), a
+  staircase of rising O-column lows (15), the share of history spent on buy
+  signals (10), few buy/sell flips in the last two years (10 — raw signal
+  count is useless here, a strong trend re-fires a breakout on nearly every
+  column), price near its high (10), RS buy vs the sector (7) and sector vs
+  SPY (3). Default history is 10y because shape needs years. Sort by chart
+  score, by quality, or by `combined` (mean of quality percentile and chart
+  score; showpieces sit at the top of the quality axis). It is a watch-list
+  generator, not a signal — a beautiful chart on a great business means the
+  market already agrees; the interesting rows are often the quality names
+  whose charts are merely repairing.
+
 ## Validation
 
 `tests/test_lrcx.py` freezes LRCX history through 2026-06-11 and asserts the
@@ -156,7 +177,9 @@ the full pattern catalog and the pole alerts on hand-traced synthetic charts;
 codes, bottom axis, and year markers. `tests/test_bpi.py` covers the BPI
 series aggregation, all six state readings, and the snowball universe
 loader. `tests/test_rs.py` covers the log-scale ladder, ratio-series date
-alignment, and all RS verdict states.
+alignment, and all RS verdict states. `tests/test_showcase.py` covers the
+showpieces-table parser and the shape score on synthetic staircase,
+collapse and saw-tooth charts.
 
 ```
 python -m unittest discover -s tests
