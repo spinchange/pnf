@@ -21,7 +21,7 @@ pnf scan --top 10 --days 7 --side buy
 pnf scan --csv          # save results to pnf-scan-sp500-DATE.csv
                         # (or --csv myfile.csv); all analysis fields
 pnf scan sectors        # rank the 11 SPDR sector ETFs
-pnf scan snowball       # scan the snowball sector-membership universe
+pnf scan snowball       # scan the SPDR sector-membership universe
 pnf scan xle            # scan one sector's components
 pnf scan mylist.txt     # custom universe, one ticker per line
 pnf bpi                 # S&P 500 bullish percent + all 11 sectors
@@ -119,9 +119,19 @@ R/R:        1.64
   (`<< 3-box reversal`).
 - **R/R** = (objective − close) / (close − stop).
 - **Bullish percent** (`pnf bpi`): percent of the universe whose latest P&F
-  signal is a buy, per sector and for the whole index. The universe is the
-  snowball project's SPDR membership CSVs (`xle-components.csv` etc.,
-  default `~\Documents\snowball`, override with `PNF_SNOWBALL`). Each
+  signal is a buy, per sector and for the whole index. Membership comes
+  from the tape project's daily snapshots of the SPDR sector-ETF holdings
+  (`spx_members` in `tape\db\tape.duckdb`, read-only, needs `duckdb`;
+  default is `tape` next to the snowball directory, override with
+  `PNF_TAPE_DB`), so index adds, drops and sector moves show up the day
+  after they happen. It is **point-in-time**: each day counts only that
+  day's members, and former members are fetched and counted for the days
+  they belonged. A warning prints if the latest snapshot is over 7 days
+  old. If tape can't be read, `pnf` falls back to the snowball project's
+  hand-kept CSVs (`xle-components.csv` etc., `PNF_SNOWBALL`), which are
+  *not* updated automatically. The report's `Members:` line says which
+  source was used. The same membership drives `pnf scan snowball`,
+  `pnf scan xle` and the sector lookup in `pnf rs`. Each
   ticker's signal history is a dated step function, so the full BPI series
   falls out of one chart build per ticker; the series is itself charted
   P&F-style (2-point boxes on 0-100, 3-box reversal) and read with the
@@ -130,16 +140,17 @@ R/R:        1.64
   chart's own buy/sell signal), Bull/Bear Correction (reversal against the
   confirmed state, mid-zone). A ticker joins the denominator at its first
   signal; the series starts once half the members have joined, so a thin
-  early denominator can't fake extreme readings. Caveats: history uses
-  *today's* membership backfilled (survivorship bias — fine for current
-  readings, don't backtest); small sectors are coarse (21 energy names =
-  4.76 points per stock).
+  early denominator can't fake extreme readings. Caveats: tape's history
+  starts 2026-07-09, and days before that use the first snapshot's members
+  (survivorship bias over that stretch, so don't backtest across it; the
+  CSV fallback backfills today's members across everything); small
+  sectors are coarse (21 energy names = 4.76 points per stock).
 
 - **Relative strength** (`pnf rs`, Dorsey Wright convention): the close
   ratio numerator/denominator × 100, charted close-only with 3-box reversal
   on a **log-scale grid** — each box 2% above the one below (`--box` to
   change), since a ratio has no natural dollar scale. For a stock, the
-  sector is looked up in the snowball membership CSVs and two charts are
+  sector is looked up in the current sector membership and two charts are
   produced: stock ÷ sector ETF and sector ETF ÷ SPY (`--vs` overrides; a
   sector ETF charts straight against SPY). Read on two clocks: the latest
   P&F signal on the ratio chart is the long-term view (RS signals
@@ -175,8 +186,9 @@ triggered at 352, stop 316, objective 456. `tests/test_patterns.py` covers
 the full pattern catalog and the pole alerts on hand-traced synthetic charts;
 `tests/test_trend_render.py` covers trend-line flips and the chart's month
 codes, bottom axis, and year markers. `tests/test_bpi.py` covers the BPI
-series aggregation, all six state readings, and the snowball universe
-loader. `tests/test_rs.py` covers the log-scale ladder, ratio-series date
+series aggregation, point-in-time membership (adds and drops moving the
+denominator), all six state readings, and the tape and snowball universe
+loaders. `tests/test_rs.py` covers the log-scale ladder, ratio-series date
 alignment, and all RS verdict states. `tests/test_showcase.py` covers the
 showpieces-table parser and the shape score on synthetic staircase,
 collapse and saw-tooth charts.

@@ -216,7 +216,7 @@ def _rs(argv):
         if etf:
             pairs = [(t, etf), (etf, rs.MARKET)]
         else:
-            note = f"{t} not in any snowball sector CSV - comparing to {rs.MARKET}"
+            note = f"{t} not in any SPDR sector - comparing to {rs.MARKET}"
             pairs = [(t, rs.MARKET)]
 
     results = []
@@ -313,45 +313,61 @@ def _bpi(argv):
     a = p.parse_args(argv)
 
     try:
-        members = data.snowball()
+        mem = data.membership()
     except data.DataError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if mem.stale:
+        print(f"warning: tape membership is from {mem.as_of}, over "
+              f"{data.TAPE_STALE_DAYS} days old", file=sys.stderr)
+    members = mem.sectors
     if a.sector:
         etf = a.sector.upper()
         if etf not in members:
-            print(f"error: no components file for {etf} "
+            print(f"error: no members for {etf} "
                   f"(have: {', '.join(members)})", file=sys.stderr)
             return 1
         members = {etf: members[etf]}
 
-    tickers = sorted({t for ts in members.values() for t in ts})
+    def history(etfs):
+        """Point-in-time membership restricted to these sectors, or None."""
+        if not mem.history:
+            return None
+        return [(d, {t for t, e in m.items() if e in etfs}) for d, m in mem.history]
+
+    scope = history(members)
+    current = {t for ts in members.values() for t in ts}
+    # Former members are fetched too: they count on the days they belonged
+    tickers = sorted(current | (set().union(*(m for _, m in scope)) if scope else set()))
     if a.limit:
         tickers = tickers[: a.limit]
-    sigs, failed = {}, []
+    sigs, failed, former_failed = {}, [], []
     for i, t in enumerate(tickers, 1):
         if i % 25 == 0:
             print(f"  ... {i}/{len(tickers)}", file=sys.stderr)
         try:
             sigs[t] = chartmod.build(data.fetch_daily(t, a.range)).signals
         except (data.DataError, OSError):
-            failed.append(t)
+            (failed if t in current else former_failed).append(t)
 
     sectors = []
-    for etf, ts in members.items():
-        sub = {t: sigs[t] for t in ts if t in sigs}
+    for etf in members:
+        sh = history({etf})
+        ever = set().union(*(m for _, m in sh)) if sh else set(members[etf])
+        sub = {t: sigs[t] for t in ever if t in sigs}
         if sub:
-            sectors.append((etf, bpimod.compute(data.SECTOR_ETFS[etf][0], sub)))
+            sectors.append((etf, bpimod.compute(data.SECTOR_ETFS[etf][0], sub, sh)))
     sectors.sort(key=lambda x: x[1].pct, reverse=True)
     if a.sector:
         top = sectors[0][1]
     else:
-        top = bpimod.compute("S&P 500", sigs)
+        top = bpimod.compute("S&P 500", sigs, scope)
 
     if a.json:
         out = {"date": top.chart.last_date, "name": top.name,
                "bpi": top.pct, "status": top.status,
-               "bullish": top.bullish, "members": top.members}
+               "bullish": top.bullish, "members": top.members,
+               "membership": mem.source}
         if not a.sector:
             out["sectors"] = [
                 {"etf": etf, "name": b.name, "bpi": b.pct, "status": b.status,
@@ -359,13 +375,14 @@ def _bpi(argv):
                 for etf, b in sectors]
         print(json.dumps(out, indent=2))
     else:
-        _bpi_report(top, sectors, show_table=not a.sector, show_chart=a.chart)
+        _bpi_report(top, sectors, mem.source, show_table=not a.sector,
+                    show_chart=a.chart)
     if a.txt:
         etf = f"-{a.sector.lower()}" if a.sector else ""
         path = a.txt if isinstance(a.txt, str) \
             else f"pnf-bpi{etf}-{top.chart.last_date}.txt"
         _write_file(path, _capture(lambda: _bpi_report(
-            top, sectors, show_table=not a.sector, show_chart=True)))
+            top, sectors, mem.source, show_table=not a.sector, show_chart=True)))
     if a.csv:
         path = a.csv if isinstance(a.csv, str) \
             else f"pnf-bpi-{top.chart.last_date}.csv"
@@ -383,16 +400,22 @@ def _bpi(argv):
     if failed:
         print(f"({len(failed)} tickers failed: {', '.join(failed[:10])}"
               f"{'...' if len(failed) > 10 else ''})", file=sys.stderr)
+    if former_failed:
+        print(f"({len(former_failed)} former members have no price data, "
+              f"left out of their member days: {', '.join(former_failed[:10])}"
+              f"{'...' if len(former_failed) > 10 else ''})", file=sys.stderr)
     return 0
 
 
-def _bpi_report(top, sectors, show_table: bool, show_chart: bool) -> None:
+def _bpi_report(top, sectors, source: str, show_table: bool,
+                show_chart: bool) -> None:
     color = render.color_enabled()
     col = top.chart.columns[-1].kind
     print(f"{top.name} Bullish Percent  as of {top.chart.last_date}")
     print(f"BPI:     {top.pct:.1f}%  ({top.bullish}/{top.members} "
           "on buy signals)")
     print(f"Status:  {_paint_bpi(top.status, color)}  ({col} column)")
+    print(f"Members: {source}")
     if show_table:
         print()
         header = (f"{'Sector':<23} {'  ' if color else ''}{'BPI':>6} "
@@ -426,7 +449,8 @@ def _scan(argv):
     p = argparse.ArgumentParser(prog="pnf scan")
     p.add_argument("universe", nargs="?", default="sp500",
                    help="'sp500' (Wikipedia), 'sectors' (SPDR sector ETFs), "
-                        "'snowball' (sector-membership CSVs), a sector ETF "
+                        "'snowball' (SPDR sector membership: tape, else the "
+                        "snowball CSVs), a sector ETF "
                         "(e.g. xle), or a path to a file of tickers")
     p.add_argument("--top", type=int,
                    help="show only the best N by R/R (default: every ticker)")
@@ -450,9 +474,12 @@ def _scan(argv):
         elif u == "sectors":
             tickers = data.SECTORS
         elif u == "snowball":
-            tickers = sorted({t for ts in data.snowball().values() for t in ts})
+            tickers = sorted({t for ts in data.membership().sectors.values()
+                              for t in ts})
         elif u.upper() in data.SECTOR_ETFS:
-            tickers = data.sector_components(u)
+            tickers = data.membership().sectors.get(u.upper())
+            if not tickers:
+                raise data.DataError(f"no members for {u.upper()}")
         else:
             with open(a.universe) as f:
                 tickers = [t.strip().upper() for t in f if t.strip()]

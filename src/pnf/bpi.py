@@ -16,10 +16,14 @@ Bear Confirmed  — O column, latest BPI-chart signal is a sell
 Bear Alert      — O column reversed down from above 70, no sell signal yet
 Bull Correction — O column, latest signal still a buy (not from above 70)
 
-Caveat: the history is computed from *today's* membership backfilled, so the
-current reading is right but deep history carries survivorship bias — don't
-backtest on it.
+Membership is point-in-time when a dated history is supplied (tape's daily
+SPDR holdings): on each day only that day's members count, so an index add
+joins and a drop leaves the denominator on the holdings date. Days before
+the first snapshot use the first snapshot's members — that stretch still
+carries survivorship bias, so don't backtest across it. Without a history,
+today's members are backfilled across the whole series.
 """
+from bisect import bisect_right
 from dataclasses import dataclass, field
 
 from .chart import Chart, build
@@ -40,16 +44,32 @@ class Bpi:
     series: list[tuple[str, float]] = field(default_factory=list)
 
 
-def series(signals_by_ticker: dict[str, list],
-           warmup: float = 0.5) -> list[tuple[str, float]]:
-    """[(date, pct), ...] on every day the percentage changes. Rows are
-    emitted only once `warmup` of the eventual members have had a first
-    signal — the thin early denominator would otherwise print a meaningless
-    giant first column on the BPI chart."""
-    members = sum(1 for sigs in signals_by_ticker.values() if sigs)
+Membership = list[tuple[str, set[str]]]   # [(as_of date, members)] oldest first
+
+
+def _members_on(membership: Membership, day: str) -> set[str]:
+    """Members per the latest snapshot on or before `day`; the first
+    snapshot before the history starts."""
+    i = bisect_right([d for d, _ in membership], day)
+    return membership[max(i - 1, 0)][1]
+
+
+def series(signals_by_ticker: dict[str, list], warmup: float = 0.5,
+           membership: Membership | None = None) -> list[tuple[str, float]]:
+    """[(date, pct), ...] on every day a signal fires or membership changes.
+    Only that day's members count (all tickers, without a membership
+    history). Rows are emitted only once `warmup` of the day's members have
+    had a first signal — the thin early denominator would otherwise print a
+    meaningless giant first column on the BPI chart."""
+    signaled = {t for t, sigs in signals_by_ticker.items() if sigs}
     events = sorted(
         (s.date, t, s.kind)
         for t, sigs in signals_by_ticker.items() for s in sigs)
+    if membership:
+        # Re-read the percentage on each holdings date the membership changes
+        events += [(d, "", "") for (_, prev), (d, cur) in
+                   zip(membership, membership[1:]) if cur != prev]
+        events.sort()
     state: dict[str, str] = {}
     out: list[tuple[str, float]] = []
     i = 0
@@ -57,22 +77,27 @@ def series(signals_by_ticker: dict[str, list],
         day = events[i][0]
         while i < len(events) and events[i][0] == day:
             _, t, kind = events[i]
-            state[t] = kind
+            if t:
+                state[t] = kind
             i += 1
-        if len(state) >= warmup * members:
-            pct = 100.0 * sum(k == "buy" for k in state.values()) / len(state)
+        active = _members_on(membership, day) if membership else signaled
+        counted = [k for t, k in state.items() if t in active]
+        if counted and len(counted) >= warmup * len(active & signaled):
+            pct = 100.0 * sum(k == "buy" for k in counted) / len(counted)
             out.append((day, round(pct, 2)))
     return out
 
 
-def compute(name: str, signals_by_ticker: dict[str, list]) -> Bpi:
-    ser = series(signals_by_ticker)
+def compute(name: str, signals_by_ticker: dict[str, list],
+            membership: Membership | None = None) -> Bpi:
+    ser = series(signals_by_ticker, membership=membership)
     if not ser:
         raise ValueError(f"{name}: no signals in the universe")
     chart = build([(d, p, p, p) for d, p in ser], box=BOX)
+    current = membership[-1][1] if membership else None
     last: dict[str, str] = {}
     for t, sigs in signals_by_ticker.items():
-        if sigs:
+        if sigs and (current is None or t in current):
             last[t] = sigs[-1].kind
     return Bpi(name, chart, ser[-1][1], classify(chart),
                len(last), sum(k == "buy" for k in last.values()), ser)

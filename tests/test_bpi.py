@@ -5,6 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    import duckdb
+except ImportError:
+    duckdb = None
+
 from pnf import bpi, data
 from pnf.chart import Signal, build
 
@@ -36,6 +41,31 @@ class TestSeries(unittest.TestCase):
                 "B": [sig("sell", "2026-01-06")],
                 "C": []}  # never signaled: not in the denominator
         b = bpi.compute("TEST", sigs)
+        self.assertEqual((b.members, b.bullish, b.pct), (2, 1, 50.0))
+
+
+class TestPointInTime(unittest.TestCase):
+    SIGS = {"A": [sig("buy", "2026-01-05")],
+            "B": [sig("sell", "2026-01-05")],
+            "C": [sig("buy", "2026-01-05")]}
+
+    def test_drop_and_add_move_the_denominator(self):
+        # A, B members from the start; B dropped 01-10; C added 01-15
+        mem = [("2026-01-08", {"A", "B"}), ("2026-01-10", {"A"}),
+               ("2026-01-15", {"A", "C"})]
+        # 01-05 is before the first snapshot: the first snapshot's members
+        self.assertEqual(bpi.series(self.SIGS, membership=mem),
+                         [("2026-01-05", 50.0), ("2026-01-10", 100.0),
+                          ("2026-01-15", 100.0)])
+
+    def test_unchanged_snapshots_add_no_rows(self):
+        mem = [("2026-01-08", {"A", "B"}), ("2026-01-09", {"A", "B"})]
+        self.assertEqual(bpi.series(self.SIGS, membership=mem),
+                         [("2026-01-05", 50.0)])
+
+    def test_compute_counts_only_current_members(self):
+        mem = [("2026-01-08", {"A", "B", "C"}), ("2026-01-10", {"B", "C"})]
+        b = bpi.compute("TEST", self.SIGS, mem)
         self.assertEqual((b.members, b.bullish, b.pct), (2, 1, 50.0))
 
 
@@ -88,6 +118,48 @@ class TestSnowballUniverse(unittest.TestCase):
     def test_missing_file_raises(self):
         with self.assertRaises(data.DataError):
             data.sector_components("XLK")
+
+
+@unittest.skipIf(duckdb is None, "duckdb not installed")
+class TestTapeUniverse(unittest.TestCase):
+    def setUp(self):
+        self._saved = data.SNOWBALL, data.TAPE_DB
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        data.SNOWBALL, data.TAPE_DB = root, root / "tape.duckdb"
+        con = duckdb.connect(str(data.TAPE_DB))
+        con.execute("CREATE TABLE spx_members (snapshot_date DATE, "
+                    "sector_etf VARCHAR, as_of DATE, ticker VARCHAR, name VARCHAR)")
+        con.executemany("INSERT INTO spx_members VALUES (?, ?, ?, ?, '')", [
+            ("2026-07-11", "XLF", "2026-07-10", "BRK.B"),
+            ("2026-07-11", "XLK", "2026-07-10", "APP"),
+            ("2026-07-11", "XLC", "2026-07-10", "WBD"),
+            ("2026-10-16", "XLF", "2026-10-15", "BRK.B"),
+            ("2026-10-16", "XLC", "2026-10-15", "APP"),
+            ("2026-10-16", "XLC", "2026-10-15", "SKYD/WS")])
+        con.close()
+
+    def tearDown(self):
+        data.SNOWBALL, data.TAPE_DB = self._saved
+        self.tmp.cleanup()
+
+    def test_history_by_holdings_date(self):
+        self.assertEqual(data.tape_history(), [
+            ("2026-07-10", {"BRK-B": "XLF", "APP": "XLK", "WBD": "XLC"}),
+            ("2026-10-15", {"BRK-B": "XLF", "APP": "XLC"})])  # warrant skipped
+
+    def test_membership_is_latest_snapshot(self):
+        m = data.membership()
+        self.assertEqual(m.sectors, {"XLC": ["APP"], "XLF": ["BRK-B"]})
+        self.assertEqual(m.as_of, "2026-10-15")
+        self.assertTrue(m.source.startswith("tape 2026-10-15"))
+
+    def test_falls_back_to_csvs_without_tape(self):
+        data.TAPE_DB = data.SNOWBALL / "missing.duckdb"
+        (data.SNOWBALL / "xle-components.csv").write_text("symbol,name\nXOM,Exxon\n")
+        m = data.membership()
+        self.assertEqual((m.sectors, m.history), ({"XLE": ["XOM"]}, None))
+        self.assertIn("tape unavailable", m.source)
 
 
 if __name__ == "__main__":

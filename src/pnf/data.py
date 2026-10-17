@@ -1,8 +1,11 @@
-"""Daily OHLC via the Yahoo Finance v8 chart API (stdlib only), plus two
-S&P 500 universes: Wikipedia (flat list) and the snowball project's SPDR
-sector membership CSVs (xle-components.csv etc., which add sector structure
-— required for sector bullish percent). Responses are cached per calendar
-day under %LOCALAPPDATA%\\pnf\\cache; stale days are pruned automatically.
+"""Daily OHLC via the Yahoo Finance v8 chart API (stdlib only), plus S&P 500
+universes: Wikipedia (flat list) and SPDR sector membership (which adds the
+sector structure required for sector bullish percent). Sector membership
+comes from the tape project's daily `spx_members` snapshots of the SPDR
+holdings (point-in-time, needs duckdb), falling back to the snowball
+project's hand-kept CSVs (xle-components.csv etc.). Responses are cached per
+calendar day under %LOCALAPPDATA%\\pnf\\cache; stale days are pruned
+automatically.
 """
 import csv
 import json
@@ -10,6 +13,7 @@ import os
 import re
 import time
 import urllib.request
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +22,9 @@ CACHE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "pnf" / "cache"
 WIKI_SP500 = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 SNOWBALL = Path(os.environ.get("PNF_SNOWBALL",
                                str(Path.home() / "Documents" / "snowball")))
+TAPE_DB = Path(os.environ.get("PNF_TAPE_DB",
+                              str(SNOWBALL.parent / "tape" / "db" / "tape.duckdb")))
+TAPE_STALE_DAYS = 7
 
 
 class DataError(RuntimeError):
@@ -91,6 +98,10 @@ def fetch_daily(ticker: str, range_: str = "5y"):
     return bars
 
 
+def _yahoo(sym: str) -> str:
+    return sym.strip().upper().replace(".", "-").replace("/", "-")
+
+
 def sector_components(etf: str) -> list[str]:
     """Symbols from <snowball>/<etf>-components.csv (symbol,name header),
     normalized to Yahoo form (BRK.B -> BRK-B)."""
@@ -99,7 +110,7 @@ def sector_components(etf: str) -> list[str]:
         raise DataError(f"{path} not found - set PNF_SNOWBALL to the "
                         "snowball project directory")
     with path.open(newline="") as f:
-        out = [r["symbol"].strip().upper().replace(".", "-").replace("/", "-")
+        out = [_yahoo(r["symbol"])
                for r in csv.DictReader(f) if r.get("symbol", "").strip()]
     if not out:
         raise DataError(f"{path}: no symbols")
@@ -114,6 +125,72 @@ def snowball() -> dict[str, list[str]]:
         raise DataError(f"no *-components.csv files under {SNOWBALL} - "
                         "set PNF_SNOWBALL to the snowball project directory")
     return out
+
+
+def tape_history(path: Path | None = None) -> list[tuple[str, dict[str, str]]]:
+    """[(as_of, {ticker: sector ETF}), ...] oldest first, one entry per
+    holdings date in tape's `spx_members`, read-only. Symbols in Yahoo form;
+    warrants and units ("SKYD/WS") are skipped — they are not common stock."""
+    path = path or TAPE_DB
+    if not path.exists():
+        raise DataError(f"{path} not found - set PNF_TAPE_DB to tape's "
+                        "db/tape.duckdb")
+    try:
+        import duckdb
+    except ImportError:
+        raise DataError("duckdb is required to read tape membership "
+                        "(pip install duckdb)") from None
+    try:
+        con = duckdb.connect(str(path), read_only=True)
+        try:
+            rows = con.execute("SELECT as_of, sector_etf, ticker FROM spx_members "
+                               "ORDER BY as_of").fetchall()
+        finally:
+            con.close()
+    except duckdb.Error as e:
+        raise DataError(f"{path}: {' '.join(str(e).split())[:200]}") from None
+    hist: dict[str, dict[str, str]] = {}
+    for d, etf, t in rows:
+        if not t or "/" in t or etf not in SECTOR_ETFS:
+            continue
+        hist.setdefault(str(d), {})[_yahoo(t)] = etf
+    if not hist:
+        raise DataError(f"{path}: spx_members is empty")
+    return sorted(hist.items())
+
+
+@dataclass
+class Membership:
+    sectors: dict[str, list[str]]   # current: sector ETF -> tickers
+    source: str                     # human-readable provenance
+    as_of: str | None = None        # tape's latest holdings date
+    # Point-in-time membership (tape only): [(as_of, {ticker: etf})] oldest first
+    history: list[tuple[str, dict[str, str]]] | None = None
+
+    @property
+    def stale(self) -> bool:
+        return (self.as_of is not None and
+                (date.today() - date.fromisoformat(self.as_of)).days > TAPE_STALE_DAYS)
+
+
+def membership() -> Membership:
+    """S&P 500 sector membership: tape's latest SPDR holdings snapshot, or
+    the snowball CSVs when tape can't be read (the reason is in .source)."""
+    try:
+        hist = tape_history()
+    except DataError as tape_err:
+        try:
+            sectors = snowball()
+        except DataError as csv_err:
+            raise DataError(f"no sector membership: {tape_err}; {csv_err}") from None
+        return Membership(sectors, f"snowball CSVs (tape unavailable: {tape_err})")
+    as_of, latest = hist[-1]
+    sectors: dict[str, list[str]] = {}
+    for t, etf in sorted(latest.items()):
+        sectors.setdefault(etf, []).append(t)
+    sectors = {etf: sectors[etf] for etf in SECTORS if etf in sectors}
+    return Membership(sectors, f"tape {as_of} (point-in-time since {hist[0][0]})",
+                      as_of, hist)
 
 
 def sp500() -> list[str]:

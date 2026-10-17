@@ -14,8 +14,8 @@ BOX_PCT = 0.02  # 2% boxes
 
 
 def sector_of() -> dict[str, str]:
-    """ticker -> sector ETF, inverted from the snowball membership CSVs."""
-    return {t: etf for etf, ts in data.snowball().items() for t in ts}
+    """ticker -> sector ETF, inverted from the current sector membership."""
+    return {t: etf for etf, ts in data.membership().sectors.items() for t in ts}
 
 
 def ratio_bars(num, den, scale: float = SCALE):
