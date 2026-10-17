@@ -167,17 +167,21 @@ class Membership:
     # Point-in-time membership (tape only): [(as_of, {ticker: etf})] oldest first
     history: list[tuple[str, dict[str, str]]] | None = None
 
-    @property
-    def stale(self) -> bool:
+    def stale(self, asof: str | None = None) -> bool:
+        """Latest snapshot more than TAPE_STALE_DAYS before `asof` (today)."""
+        ref = date.fromisoformat(asof) if asof else date.today()
         return (self.as_of is not None and
-                (date.today() - date.fromisoformat(self.as_of)).days > TAPE_STALE_DAYS)
+                (ref - date.fromisoformat(self.as_of)).days > TAPE_STALE_DAYS)
 
 
-def membership() -> Membership:
-    """S&P 500 sector membership: tape's latest SPDR holdings snapshot, or
+def membership(asof: str | None = None) -> Membership:
+    """S&P 500 sector membership: tape's latest SPDR holdings snapshot (the
+    latest on or before `asof`; the first one if `asof` predates tape), or
     the snowball CSVs when tape can't be read (the reason is in .source)."""
     try:
         hist = tape_history()
+        if asof:
+            hist = [h for h in hist if h[0] <= asof] or hist[:1]
     except DataError as tape_err:
         try:
             sectors = snowball()
@@ -189,8 +193,11 @@ def membership() -> Membership:
     for t, etf in sorted(latest.items()):
         sectors.setdefault(etf, []).append(t)
     sectors = {etf: sectors[etf] for etf in SECTORS if etf in sectors}
-    return Membership(sectors, f"tape {as_of} (point-in-time since {hist[0][0]})",
-                      as_of, hist)
+    if asof and asof < as_of:
+        note = f"earliest snapshot, after {asof}: survivorship bias"
+    else:
+        note = f"point-in-time since {hist[0][0]}"
+    return Membership(sectors, f"tape {as_of} ({note})", as_of, hist)
 
 
 def sp500() -> list[str]:

@@ -309,17 +309,30 @@ def _bpi(argv):
     p.add_argument("--csv", nargs="?", const=True, metavar="FILE",
                    help="write the sector table to a CSV file "
                         "(default name pnf-bpi-DATE.csv)")
+    p.add_argument("--asof", metavar="DATE",
+                   help="as of the close on DATE (YYYY-MM-DD), or 'friday' "
+                        "for the most recent Friday; a holiday falls back to "
+                        "the last trading day before it")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
+    asof = None
+    if a.asof:
+        try:
+            asof = _asof_date(a.asof)
+        except ValueError:
+            print(f"error: --asof {a.asof!r}: expected YYYY-MM-DD or 'friday'",
+                  file=sys.stderr)
+            return 1
     try:
-        mem = data.membership()
+        mem = data.membership(asof)
     except data.DataError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    if mem.stale:
+    if mem.stale(asof):
         print(f"warning: tape membership is from {mem.as_of}, over "
-              f"{data.TAPE_STALE_DAYS} days old", file=sys.stderr)
+              f"{data.TAPE_STALE_DAYS} days before {asof or 'today'}",
+              file=sys.stderr)
     members = mem.sectors
     if a.sector:
         etf = a.sector.upper()
@@ -342,13 +355,24 @@ def _bpi(argv):
     if a.limit:
         tickers = tickers[: a.limit]
     sigs, failed, former_failed = {}, [], []
+    day = ""  # the session the report is as of: latest bar across the universe
     for i, t in enumerate(tickers, 1):
         if i % 25 == 0:
             print(f"  ... {i}/{len(tickers)}", file=sys.stderr)
         try:
-            sigs[t] = chartmod.build(data.fetch_daily(t, a.range)).signals
-        except (data.DataError, OSError):
+            bars = data.fetch_daily(t, a.range)
+            if asof:
+                bars = [b for b in bars if b[0] <= asof]
+            if not bars:
+                raise data.DataError(f"{t}: no bars on or before {asof}")
+            sigs[t] = chartmod.build(bars).signals
+            day = max(day, bars[-1][0])
+        except (data.DataError, OSError, ValueError):
             (failed if t in current else former_failed).append(t)
+    if not sigs:
+        print("error: no price data for any member", file=sys.stderr)
+        return 1
+    week_ago = str(date.fromisoformat(day) - timedelta(days=7))
 
     sectors = []
     for etf in members:
@@ -363,37 +387,43 @@ def _bpi(argv):
     else:
         top = bpimod.compute("S&P 500", sigs, scope)
 
+    def wk(b):
+        prior = b.pct_on(week_ago)
+        return None if prior is None else round(b.pct - prior, 2)
+
     if a.json:
-        out = {"date": top.chart.last_date, "name": top.name,
-               "bpi": top.pct, "status": top.status,
+        out = {"date": day, "name": top.name,
+               "bpi": top.pct, "week_change": wk(top), "status": top.status,
                "bullish": top.bullish, "members": top.members,
                "membership": mem.source}
         if not a.sector:
             out["sectors"] = [
-                {"etf": etf, "name": b.name, "bpi": b.pct, "status": b.status,
+                {"etf": etf, "name": b.name, "bpi": b.pct,
+                 "week_change": wk(b), "status": b.status,
                  "bullish": b.bullish, "members": b.members}
                 for etf, b in sectors]
         print(json.dumps(out, indent=2))
     else:
-        _bpi_report(top, sectors, mem.source, show_table=not a.sector,
-                    show_chart=a.chart)
+        _bpi_report(top, sectors, day, week_ago, mem.source,
+                    show_table=not a.sector, show_chart=a.chart)
     if a.txt:
         etf = f"-{a.sector.lower()}" if a.sector else ""
         path = a.txt if isinstance(a.txt, str) \
-            else f"pnf-bpi{etf}-{top.chart.last_date}.txt"
+            else f"pnf-bpi{etf}-{day}.txt"
         _write_file(path, _capture(lambda: _bpi_report(
-            top, sectors, mem.source, show_table=not a.sector, show_chart=True)))
+            top, sectors, day, week_ago, mem.source,
+            show_table=not a.sector, show_chart=True)))
     if a.csv:
         path = a.csv if isinstance(a.csv, str) \
-            else f"pnf-bpi-{top.chart.last_date}.csv"
+            else f"pnf-bpi-{day}.csv"
         rows = [("", top.name, top)] if not a.sector else []
         rows += [(etf, data.SECTOR_ETFS[etf][0], b) for etf, b in sectors]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["etf", "name", "date", "bpi", "column", "status",
-                        "bullish", "members"])
+            w.writerow(["etf", "name", "date", "bpi", "week_change", "column",
+                        "status", "bullish", "members"])
             for etf, name, b in rows:
-                w.writerow([etf, name, b.chart.last_date, b.pct,
+                w.writerow([etf, name, day, b.pct, wk(b),
                             b.chart.columns[-1].kind, b.status,
                             b.bullish, b.members])
         print(f"wrote {path}", file=sys.stderr)
@@ -407,19 +437,24 @@ def _bpi(argv):
     return 0
 
 
-def _bpi_report(top, sectors, source: str, show_table: bool,
-                show_chart: bool) -> None:
+def _week_change(b, week_ago: str) -> str:
+    prior = b.pct_on(week_ago)
+    return "n/a" if prior is None else f"{b.pct - prior:+.1f}"
+
+
+def _bpi_report(top, sectors, day: str, week_ago: str, source: str,
+                show_table: bool, show_chart: bool) -> None:
     color = render.color_enabled()
     col = top.chart.columns[-1].kind
-    print(f"{top.name} Bullish Percent  as of {top.chart.last_date}")
+    print(f"{top.name} Bullish Percent  as of {day} close")
     print(f"BPI:     {top.pct:.1f}%  ({top.bullish}/{top.members} "
-          "on buy signals)")
+          f"on buy signals)  {_week_change(top, week_ago)} vs {week_ago}")
     print(f"Status:  {_paint_bpi(top.status, color)}  ({col} column)")
     print(f"Members: {source}")
     if show_table:
         print()
         header = (f"{'Sector':<23} {'  ' if color else ''}{'BPI':>6} "
-                  f"{'Col':^4} {'Status':<16} {'Bulls':>8}")
+                  f"{'1wk':>6} {'Col':^4} {'Status':<16} {'Bulls':>8}")
         print(header)
         for etf, b in sectors:
             name, hexcode = data.SECTOR_ETFS[etf]
@@ -430,12 +465,21 @@ def _bpi_report(top, sectors, source: str, show_table: bool,
             else:
                 tri = ""
             print(f"{sec} {tri}{b.pct:>6.1f} "
+                  f"{_week_change(b, week_ago):>6} "
                   f"{b.chart.columns[-1].kind:^4} "
                   f"{_paint_bpi(f'{b.status:<16}', color)} "
                   f"{f'{b.bullish}/{b.members}':>8}")
     if show_chart:
         print()
         print(render.render(top.chart))
+
+
+def _asof_date(text: str) -> str:
+    """'YYYY-MM-DD' or 'friday' (the most recent Friday, today included)."""
+    if text.lower() == "friday":
+        today = date.today()
+        return str(today - timedelta(days=(today.weekday() - 4) % 7))
+    return str(date.fromisoformat(text))
 
 
 def _paint_bpi(status: str, enabled: bool) -> str:

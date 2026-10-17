@@ -28,6 +28,8 @@ pnf bpi                 # S&P 500 bullish percent + all 11 sectors
 pnf bpi xle --chart     # one sector's BPI with its own P&F chart
 pnf bpi --txt --csv     # save report + BPI chart to pnf-bpi-DATE.txt and
                         # the sector table to pnf-bpi-DATE.csv
+pnf bpi --asof friday   # as of last Friday's close (a holiday falls back to
+                        # the prior session); or --asof 2026-07-02
 pnf rs NVDA             # relative strength: NVDA vs its sector + sector vs SPY
 pnf rs NVDA --vs QQQ    # ... vs an explicit benchmark
 pnf rs xlv --chart      # one sector's RS vs SPY, with the ratio chart
@@ -145,6 +147,22 @@ R/R:        1.64
   (survivorship bias over that stretch, so don't backtest across it; the
   CSV fallback backfills today's members across everything); small
   sectors are coarse (21 energy names = 4.76 points per stock).
+
+  `--asof DATE` cuts every price series at DATE's close and uses the
+  latest tape snapshot on or before it. The report shows the actual
+  session date, so a market-holiday Friday reads as Thursday's close, with
+  no holiday calendar needed. Each reading also shows its change from one
+  week earlier (`1wk`, also `week_change` in the CSV/JSON).
+
+  **Weekly report**: `ops\weekly_bpi.ps1` runs `pnf bpi --asof <Friday>`.
+  It writes `reports\bpi\pnf-bpi-DATE.txt` (with the BPI chart) and
+  `.csv`, then sends a one-line-per-sector summary plus the `.txt` to
+  Telegram through `hermes send`. Logs go to `reports\bpi\logs`. The
+  Windows scheduled task "pnf weekly BPI" runs it Saturdays at 8:00 AM,
+  after tape's Friday-evening snapshot. It uses S4U logon ("Do not store
+  password"), so it runs whether or not you're logged on and no password
+  is stored. If the machine is off at 8:00, the missed run starts once it
+  is back on.
 
 - **Relative strength** (`pnf rs`, Dorsey Wright convention): the close
   ratio numerator/denominator × 100, charted close-only with 3-box reversal

@@ -63,6 +63,12 @@ class TestPointInTime(unittest.TestCase):
         self.assertEqual(bpi.series(self.SIGS, membership=mem),
                          [("2026-01-05", 50.0)])
 
+    def test_pct_on_is_the_reading_in_force(self):
+        b = bpi.compute("TEST", {"A": [sig("buy", "2026-01-05"), sig("sell", "2026-01-20")],
+                                 "B": [sig("sell", "2026-01-05")]})
+        self.assertEqual([b.pct_on(d) for d in ("2026-01-04", "2026-01-10", "2026-01-31")],
+                         [None, 50.0, 0.0])
+
     def test_compute_counts_only_current_members(self):
         mem = [("2026-01-08", {"A", "B", "C"}), ("2026-01-10", {"B", "C"})]
         b = bpi.compute("TEST", self.SIGS, mem)
@@ -154,12 +160,40 @@ class TestTapeUniverse(unittest.TestCase):
         self.assertEqual(m.as_of, "2026-10-15")
         self.assertTrue(m.source.startswith("tape 2026-10-15"))
 
+    def test_membership_asof_uses_snapshot_on_or_before(self):
+        m = data.membership("2026-10-14")
+        self.assertEqual((m.as_of, m.sectors["XLK"]), ("2026-07-10", ["APP"]))
+        self.assertEqual(len(m.history), 1)
+        # Before tape starts: the first snapshot, not an error
+        self.assertEqual(data.membership("2026-01-02").as_of, "2026-07-10")
+        self.assertTrue(m.stale("2026-10-14"))
+        self.assertFalse(m.stale("2026-07-12"))
+
     def test_falls_back_to_csvs_without_tape(self):
         data.TAPE_DB = data.SNOWBALL / "missing.duckdb"
         (data.SNOWBALL / "xle-components.csv").write_text("symbol,name\nXOM,Exxon\n")
         m = data.membership()
         self.assertEqual((m.sectors, m.history), ({"XLE": ["XOM"]}, None))
         self.assertIn("tape unavailable", m.source)
+
+
+class TestAsofDate(unittest.TestCase):
+    def test_friday_is_most_recent_friday(self):
+        from datetime import date
+        from unittest import mock
+        from pnf import cli
+        for today, want in (("2026-10-17", "2026-10-16"),   # Saturday
+                            ("2026-10-16", "2026-10-16"),   # Friday itself
+                            ("2026-10-15", "2026-10-09")):  # Thursday
+            with mock.patch.object(cli, "date", wraps=date) as d:
+                d.today.return_value = date.fromisoformat(today)
+                self.assertEqual(cli._asof_date("friday"), want)
+
+    def test_explicit_date_validated(self):
+        from pnf import cli
+        self.assertEqual(cli._asof_date("2026-07-03"), "2026-07-03")
+        with self.assertRaises(ValueError):
+            cli._asof_date("July 3")
 
 
 if __name__ == "__main__":

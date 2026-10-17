@@ -43,6 +43,12 @@ class Bpi:
     bullish: int              # tickers on a buy signal
     series: list[tuple[str, float]] = field(default_factory=list)
 
+    def pct_on(self, day: str) -> float | None:
+        """The reading in force at the close on `day`; None before the
+        series starts."""
+        i = bisect_right([d for d, _ in self.series], day)
+        return self.series[i - 1][1] if i else None
+
 
 Membership = list[tuple[str, set[str]]]   # [(as_of date, members)] oldest first
 

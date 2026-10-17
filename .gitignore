@@ -13,3 +13,6 @@ pnf-bpi-*.csv
 pnf-bpi-*.txt
 pnf-showcase-*.csv
 pnf-showcase-*.txt
+
+# weekly report output and logs (ops\weekly_bpi.ps1)
+reports/
